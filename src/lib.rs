@@ -7,9 +7,30 @@ use std::string::String;
 use std::sync::LazyLock; // for LazyLock init
 use regex::Regex;
 use log::{trace, debug, info}; // import the logging macros. Options include trace, debug, info, warn, error
+pub const ARGS_CHAR_LIMIT: usize = 30000;
+
+////////////////////////////////////////////////////////////////////////////////////////
+//                                  Print Usage Help                                  //
+////////////////////////////////////////////////////////////////////////////////////////
+/// Prints the wrapper usage/help message when `WRAPPER_OPTIONS` or `WRAPPER_HELP` is set.
+pub fn printUsage() {
+    if env::var("WRAPPER_OPTIONS").is_ok() || env::var("WRAPPER_HELP").is_ok() {
+        println!("WRAPPER_PREFER_VS: Prefer VS Studio LLVM executables over ROCm LLVM.");
+        println!("WRAPPER_SKIP_BAD_FLAGS: Skip removing bad flags.");
+        println!("WRAPPER_SKIP_SWAP_FLAGS: Skip swapping problematic flags.");
+        println!("WRAPPER_SKIP_ADD_FLAGS: Skip adding extra helpful flags.");
+        println!("WRAPPER_SKIP_SPLIT_FLAGS: Skip splitting fused flags.");
+        println!("WRAPPER_SKIP_ALL_FLAGS: Skip removing bad flags, swapping problematic flags, adding extra helpful flags, and splitting fused flags.");
+        println!("WRAPPER_SKIP_VERSION_HANDLING: Skip CLI version handling: -v, --version.");
+        println!("WRAPPER_ARGS_CHAR_LIMIT: Override the default argument character limit of {} to enable response files.", ARGS_CHAR_LIMIT);
+        println!("WRAPPER_FORCE_RESPONSE_FILES: Force response files regardless of arguments total char length of {}", ARGS_CHAR_LIMIT);
+        println!("WRAPPER_ENABLE_PASSTHROUGH: Pass through arguments directly without processing.");
+        println!("WRAPPER_OPTIONS or WRAPPER_HELP: Print this help message and exit.");
+    }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                                    Search paths                                     //
+//                              Executables Search Paths                               //
 /////////////////////////////////////////////////////////////////////////////////////////
 pub const HIP_PATH: &str = env!("HIP_PATH_");
 pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");
@@ -29,7 +50,7 @@ pub static PATHS: LazyLock<[&str; 6]> = LazyLock::new(|| {
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                                    Keywords                                         //
+//                                Executables Keywords                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
 pub static wrapperKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)ccache"#).unwrap());
 pub static compilerKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|hip|cl|gcc|g\+\+)"#).unwrap());
@@ -40,7 +61,7 @@ pub static msvcKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(cl
 pub static gccKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                     Bad patterns regex, -/ start, case sensitive                    //
+//                  Define Bad Flag Regexes, -/ start, case sensitive                  //
 /////////////////////////////////////////////////////////////////////////////////////////
 pub static LLVMCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
 pub static MSVCCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
@@ -53,7 +74,7 @@ pub static GCCLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""
 pub static SplitFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](Fd|Fo)"#).unwrap());
 
 //////////////////////////////////////////////////////////////////////////////////////////
-//                       Swaps: pattern regex → replacement                             //
+//                             Swap Problematic Arguments                               //
 //////////////////////////////////////////////////////////////////////////////////////////
 pub static LLVMCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
@@ -245,7 +266,7 @@ pub fn filterArgs(args: Vec<String>, BadFlags: Regex, SwapPairs: Vec<(Regex, Str
 
     if finalArgs.iter().any(|a| a.starts_with('@')) {
         // rsp already used—pass through
-    } else if finalArgs.join(" ").len() > ArgsCharLimit { // too long: make rsp
+    } else if finalArgs.join(" ").len() > ARGS_CHAR_LIMIT { // too long: make rsp
         let rsp_path = &ResponseFileName.replace(".rsp", &format!("_{}.rsp", id()).to_owned());
         let mut f = File::create(&rsp_path).unwrap();
         for arg in &finalArgs { writeln!(f, "{}", arg).unwrap(); }  // or space/newline
