@@ -1,0 +1,81 @@
+[package]
+name = "wrapper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.13.1"
+log = "0.4.28"
+env_logger = "0.11.8"
+
+[[bin]]
+name = "cl-rs"
+path = "src/cl.rs"
+
+[[bin]]
+name = "clang-rs"
+path = "src/clang.rs"
+
+[[bin]]
+name = "clangpp-rs"
+path = "src/clang++.rs"
+
+[[bin]]
+name = "clang-cl-rs"
+path = "src/clang-cl.rs"
+
+[[bin]]
+name = "gcc-rs"
+path = "src/gcc.rs"
+
+[[bin]]
+name = "gpp-rs"
+path = "src/g++.rs"
+
+[[bin]]
+name = "hipcc-rs"
+path = "src/hipcc.rs"
+
+[[bin]]
+name = "link-rs"
+path = "src/link.rs"
+
+[[bin]]
+name = "ld-rs"
+path = "src/ld.rs"
+
+[[bin]]
+name = "lld-link-rs"
+path = "src/lld-link.rs"
+
+[[bin]]
+name = "sccache-rs"
+path = "src/sccache.rs"
+
+[[bin]]
+name = "sccache-cl-rs"
+path = "src/sccache-cl.rs"
+
+[[bin]]
+name = "sccache-clang-rs"
+path = "src/sccache-clang.rs"
+
+[[bin]]
+name = "sccache-clangpp-rs"
+path = "src/sccache-clang++.rs"
+
+[[bin]]
+name = "sccache-clang-cl-rs"
+path = "src/sccache-clang-cl.rs"
+
+[[bin]]
+name = "sccache-gcc-rs"
+path = "src/sccache-gcc.rs"
+
+[[bin]]
+name = "sccache-gpp-rs"
+path = "src/sccache-g++.rs"
+
+[[bin]]
+name = "sccache-hipcc-rs"
+path = "src/sccache-hipcc.rs"
