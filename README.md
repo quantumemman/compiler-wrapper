@@ -74,7 +74,7 @@ compile time** from environment variables, so they must be set when building:
 > expanded when the crate is compiled, not at runtime.
 ---
 
-## Runtime behaviour
+## Runtime behavior
 
 Print the full usage/help banner (also lists every runtime variable):
 
@@ -155,7 +155,7 @@ cargo test          # runs the library unit tests (argument pipeline)
 cargo test --lib    # targeted: only the src/lib.rs suite
 ```
 
-The tests cover splitting of fused flags, bad-flag removal, swap behaviour,
+The tests cover splitting of fused flags, bad-flag removal, swap behavior,
 the `skip_*` combinations, extra-flag splicing, response-file emission, and the
 empty-argument `--version` fallback.
 
