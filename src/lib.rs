@@ -202,7 +202,7 @@ pub fn getFlags(family: &(EXEFamily, EXEKind)) -> (Regex, Vec<(Regex, String)>, 
 //                                   Filter Arguments                                  //
 /////////////////////////////////////////////////////////////////////////////////////////
 // Per-call configuration controlling which filtering steps run. Derived from env vars
-// in `filter_args`; kept as data so the pure logic in `applyFilter` is unit-testable
+// in `filterArgs`; kept as data so the pure logic in `applyFilter` is unit-testable
 // without mutating global process environment (which is unsafe across parallel tests).
 #[derive(Default)]
 pub struct FilterConfig {
@@ -237,6 +237,11 @@ impl FilterConfig {
             Err(_) => ARGS_CHAR_LIMIT,
         }
     }
+}
+
+pub fn filterArgs(args: Vec<String>, BadFlags: Regex, SwapPairs: Vec<(Regex, String)>, ExtraFlags: String) -> Vec<String> {
+    let config = FilterConfig::from_env();
+    applyFilter(args, &config, BadFlags, SwapPairs, ExtraFlags)
 }
 
 // Applies the filtering pipeline described by `config`. Pure aside from writing the
@@ -335,7 +340,7 @@ impl Kind {
         let EXE: (String, String) = getEXE(&name);
         let family: (EXEFamily, EXEKind) = getEXEFamily(&name);
         let (regex, swap_pairs, extra_flags) = getFlags(&family);
-        let finalArgs: Vec<String> = filter_args(args.clone(), regex, swap_pairs, extra_flags.to_string());
+        let finalArgs: Vec<String> = filterArgs(args.clone(), regex, swap_pairs, extra_flags.to_string());
         let expect: String = name.1.clone() + " died";
         
         Kind {
@@ -677,7 +682,7 @@ mod tests {
             "/Foanother\\target\\directory".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filter_args(args, never_match(), vec![], String::new());
+        let result = filterArgs(args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
@@ -698,7 +703,7 @@ mod tests {
             "/Fo".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filter_args(args, never_match(), vec![], String::new());
+        let result = filterArgs(args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
@@ -714,7 +719,7 @@ mod tests {
     fn splits_case_insensitive_prefix() {
         let fused = vec!["/Fodist\\lib.obj".to_string()];
         assert_eq!(
-            filter_args(fused, never_match(), vec![], String::new()),
+            filterArgs(fused, never_match(), vec![], String::new()),
             vec!["/Fo".to_string(), "dist\\lib.obj".to_string()]
         );
     }
@@ -728,7 +733,7 @@ mod tests {
             "-clang:/FoCMakeLists\\my\\sussy.dir\\".to_string(),
             "/Fdsome\\suspicious\\dirname".to_string(),
         ];
-        let result = filter_args(args, never_match(), vec![], String::new());
+        let result = filterArgs(args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
