@@ -9,26 +9,6 @@ use regex::Regex;
 use log::{trace, debug, info}; // import the logging macros. Options include trace, debug, info, warn, error
 pub const ARGS_CHAR_LIMIT: usize = 30000;
 
-////////////////////////////////////////////////////////////////////////////////////////
-//                                  Print Usage Help                                  //
-////////////////////////////////////////////////////////////////////////////////////////
-/// Prints the wrapper usage/help message when `WRAPPER_OPTIONS` or `WRAPPER_HELP` is set.
-pub fn printUsage() {
-    if env::var("WRAPPER_OPTIONS").is_ok() || env::var("WRAPPER_HELP").is_ok() {
-        println!("WRAPPER_PREFER_VS: Prefer VS Studio LLVM executables over ROCm LLVM.");
-        println!("WRAPPER_SKIP_BAD_FLAGS: Skip removing bad flags.");
-        println!("WRAPPER_SKIP_SWAP_FLAGS: Skip swapping problematic flags.");
-        println!("WRAPPER_SKIP_ADD_FLAGS: Skip adding extra helpful flags.");
-        println!("WRAPPER_SKIP_SPLIT_FLAGS: Skip splitting fused flags.");
-        println!("WRAPPER_SKIP_ALL_FLAGS: Skip removing bad flags, swapping problematic flags, adding extra helpful flags, and splitting fused flags.");
-        println!("WRAPPER_SKIP_VERSION_HANDLING: Skip CLI version handling: -v, --version.");
-        println!("WRAPPER_ARGS_CHAR_LIMIT: Override the default argument character limit of {} to enable response files.", ARGS_CHAR_LIMIT);
-        println!("WRAPPER_FORCE_RESPONSE_FILES: Force response files regardless of arguments total char length of {}", ARGS_CHAR_LIMIT);
-        println!("WRAPPER_ENABLE_PASSTHROUGH: Pass through arguments directly without processing.");
-        println!("WRAPPER_OPTIONS or WRAPPER_HELP: Print this help message and exit.");
-    }
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////
 //                              Executables Search Paths                               //
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -220,45 +200,102 @@ pub fn getFlags(family: &(EXEFamily, EXEKind)) -> (Regex, Vec<(Regex, String)>, 
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                                   Filter arguments                                  //
+//                                   Filter Arguments                                  //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub fn filterArgs(args: Vec<String>, BadFlags: Regex, SwapPairs: Vec<(Regex, String)>, ExtraFlags: String) -> Vec<String> {
+// Per-call configuration controlling which filtering steps run. Derived from env vars
+// in `filterArgs`; kept as data so the pure logic in `applyFilter` is unit-testable
+// without mutating global process environment (which is unsafe across parallel tests).
+#[derive(Default)]
+pub struct FilterConfig {
+    pub skip_split: bool,           // skip splitting fused /Fd<dir> /Fo<dir> flags
+    pub skip_bad: bool,             // skip removing bad flags
+    pub skip_swap: bool,            // skip swapping problematic flags
+    pub skip_add: bool,             // skip appending extra helpful flags
+    pub skip_version_on_empty: bool, // skip auto-adding --version when args is empty
+    pub force_response_files: bool, // always use a response file (regardless of length)
+    pub args_char_limit: usize,     // override for the argument character limit
+}
+
+impl FilterConfig {
+    // Reads the WRAPPER_* environment variables into a FilterConfig.
+    pub fn from_env() -> Self {
+        let skipAll = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
+        FilterConfig {
+            skip_split: skipAll || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
+            skip_bad: skipAll || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
+            skip_swap: skipAll || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
+            skip_add: skipAll || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
+            skip_version_on_empty: env::var("WRAPPER_SKIP_VERSION_ON_EMPTY").is_ok(),
+            force_response_files: env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
+            args_char_limit: FilterConfig::argsCharLimit(),
+        }
+    }
+
+    // Resolves the effective character limit, honoring WRAPPER_ARGS_CHAR_LIMIT.
+    fn argsCharLimit() -> usize {
+        match env::var("WRAPPER_ARGS_CHAR_LIMIT") {
+            Ok(v) => v.trim().parse::<usize>().unwrap_or(ARGS_CHAR_LIMIT),
+            Err(_) => ARGS_CHAR_LIMIT,
+        }
+    }
+}
+
+// Applies the filtering pipeline described by `config`. Pure aside from writing the
+// response file when args get too long (or are forced through).
+fn applyFilter(
+    args: Vec<String>,
+    config: &FilterConfig,
+    BadFlags: Regex,
+    SwapPairs: Vec<(Regex, String)>,
+    ExtraFlags: String,
+) -> Vec<String> {
     // Split fused flag+directory args (e.g. /Fdsome\target\directory -> /Fd + some\target\directory)
     // BEFORE the swap/bad loop, because one fused arg expands into two and the array grows.
     // An arg that is exactly the flag (already standalone) passes through unchanged.
     let mut expanded: Vec<String> = Vec::new();
-    for arg in args {
-        if let Some(cap) = SplitFlags.captures(&arg) {
-            let full = cap.get(0).unwrap().as_str();
-            if full.len() < arg.len() {                       // fused flag + directory
-                expanded.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
-                expanded.push(arg[full.len()..].to_string()); // directory part
-            } else {                                          // exactly /Fd or /Fo
+    if !config.skip_split {
+        for arg in args {
+            if let Some(cap) = SplitFlags.captures(&arg) {
+                let full = cap.get(0).unwrap().as_str();
+                if full.len() < arg.len() {                       // fused flag + directory
+                    expanded.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
+                    expanded.push(arg[full.len()..].to_string()); // directory part
+                } else {                                          // exactly /Fd or /Fo
+                    expanded.push(arg);
+                }
+            } else {
                 expanded.push(arg);
             }
-        } else {
-            expanded.push(arg);
         }
+    } else {
+        expanded = args;
     }
 
     // final arguments
     let mut finalArgs: Vec<String> = Vec::new();
     for arg in expanded {
-        if BadFlags.is_match(&arg) { continue; }       // Drop if bad
-        else {
-            let mut newArg = arg.clone();              // Swap if match
+        if !config.skip_bad && BadFlags.is_match(&arg) { continue; } // Drop if bad
+        let mut newArg = arg.clone();                             // Swap if match
+        if !config.skip_swap {
             for (re, swap) in &*SwapPairs {
                 if re.is_match(&arg) {
                     newArg = re.replace(&arg, swap.clone()).trim().to_string();
-                    break; }}
-            if !newArg.is_empty() {
-                finalArgs.push(newArg); }
+                    break;
+                }
+            }
+        }
+        if !newArg.is_empty() {
+            finalArgs.push(newArg);
         }
     }
-    
-    if finalArgs.is_empty() { 
+
+    if finalArgs.is_empty() && !config.skip_version_on_empty {
         finalArgs.push("--version".into());
-    } else if finalArgs.len() > 1 && !ExtraFlags.is_empty() && finalArgs.iter().any(|a| a == "-x") {
+    } else if !config.skip_add
+        && finalArgs.len() > 1
+        && !ExtraFlags.is_empty()
+        && finalArgs.iter().any(|a| a == "-x")
+    {
         let index = finalArgs.iter().position(|a| a == "-x").unwrap();
         if finalArgs[index + 2] != ExtraFlags.split(" ").next().unwrap() {  // Avoid inserting extra flags twice
             finalArgs.splice(index + 2..index + 2, ExtraFlags.split(" ").map(|s| s.into())); }
@@ -266,11 +303,13 @@ pub fn filterArgs(args: Vec<String>, BadFlags: Regex, SwapPairs: Vec<(Regex, Str
 
     if finalArgs.iter().any(|a| a.starts_with('@')) {
         // rsp already used—pass through
-    } else if finalArgs.join(" ").len() > ARGS_CHAR_LIMIT { // too long: make rsp
+    } else if config.force_response_files || finalArgs.join(" ").len() > config.args_char_limit {
+        // too long (or forced): make rsp
         let rsp_path = &ResponseFileName.replace(".rsp", &format!("_{}.rsp", id()).to_owned());
         let mut f = File::create(&rsp_path).unwrap();
         for arg in &finalArgs { writeln!(f, "{}", arg).unwrap(); }  // or space/newline
-        finalArgs = vec![format!("@{}", &rsp_path)]; }
+        finalArgs = vec![format!("@{}", &rsp_path)];
+    }
     return finalArgs;
 }
 
@@ -334,8 +373,294 @@ impl Kind {
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////////////
+//                                  Print Usage Help                                  //
+////////////////////////////////////////////////////////////////////////////////////////
+/// ANSI SGR (Select Graphic Rendition) codes used to decorate the usage box.
+/// Using raw ANSI keeps the wrapper dependency-free while still giving a
+/// colourful heading, sections and borders on modern terminals.
+mod ansi {
+    pub const RESET: &str = "\x1b[0m";
+    pub const BOLD: &str = "\x1b[1m";
+    pub const DIM: &str = "\x1b[2m";
+    pub const CYAN: &str = "\x1b[36m";
+    pub const YELLOW: &str = "\x1b[33m";
+    pub const MAGENTA: &str = "\x1b[35m";
+}
+
+/// Wrap `text` with an SGR code and reset it afterwards.
+fn paint(text: &str, code: &str) -> String {
+    format!("{code}{text}{}", ansi::RESET)
+}
+
+/// Visible width of a string, ignoring ANSI escape sequences (which occupy
+/// zero display columns).
+fn visible_len(s: &str) -> usize {
+    let mut count = 0;
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            for c2 in it.by_ref() {
+                if c2 == 'm' {
+                    break;
+                }
+            }
+        } else {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Wrap plain (uncoloured) text to `width` columns at word boundaries.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let sep = if cur.is_empty() { 0 } else { 1 };
+        if cur.chars().count() + sep + word.chars().count() > width {
+            out.push(cur.clone());
+            cur.clear();
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Centre `s` within `inner` columns using visible width.
+fn center_text(s: &str, inner: usize) -> String {
+    let pad = inner.saturating_sub(visible_len(s));
+    let left = pad / 2;
+    format!("{}{}{}", " ".repeat(left), s, " ".repeat(pad - left))
+}
+
+/// Build the `• name  description` rows, wrapping long descriptions so that
+/// continuation lines align under the description column.
+fn usage_pair(name: &str, desc: &str, name_w: usize, inner: usize) -> Vec<String> {
+    let bullet = paint("  • ", ansi::MAGENTA);
+    let key = paint(name, &format!("{}{}", ansi::BOLD, ansi::CYAN));
+    let field_w = 4 + name_w; // bullet + key field
+    let field = format!("{bullet}{key}");
+    let field_pad = field_w.saturating_sub(visible_len(&field));
+    let mut lead = format!("{field}{}", " ".repeat(field_pad));
+    lead.push_str("  "); // gap before the description column
+
+    let desc_w = inner.saturating_sub(field_w + 2);
+    let indent = " ".repeat(field_w + 2);
+
+    let mut out: Vec<String> = Vec::new();
+    for (i, line) in wrap_text(desc, desc_w).into_iter().enumerate() {
+        if i == 0 {
+            out.push(format!("{lead}{line}"));
+        } else {
+            out.push(format!("{indent}{line}"));
+        }
+    }
+    out
+}
+/// A full-width content row inside the box: `║  <content padded>  ║`.
+fn box_row(content: &str, inner: usize) -> String {
+    let pad = inner.saturating_sub(visible_len(content));
+    format!("║ {content}{} ║", " ".repeat(pad))
+}
+
+/// A section divider `╠═ title ═══...══╣` with the title coloured.
+fn section_row(title: &str, inner: usize) -> String {
+    let inside = inner + 2; // space between the ╠ and ╣ borders
+    let t = format!(" {title} ");
+    let rule_units = inside - t.chars().count();
+    let left = rule_units / 2;
+    let right = rule_units - left;
+    let mut s = String::from("╠");
+    s.push_str(&"═".repeat(left));
+    s.push_str(&paint(&t, &format!("{}{}", ansi::BOLD, ansi::YELLOW)));
+    s.push_str(&"═".repeat(right));
+    s.push('╣');
+    s
+}
+
+/// Prints the wrapper usage/help message when `WRAPPER_OPTIONS` or `WRAPPER_HELP` is set.
+/// Returns `true` if the help message was shown (so the caller can exit), `false` otherwise.
+pub fn printUsage() -> bool {
+    if !(env::var("WRAPPER_OPTIONS").is_ok() || env::var("WRAPPER_HELP").is_ok()) {
+        return false;
+    }
+
+    const INNER: usize = 90; // usable text columns between the two side borders
+    const NAME_W: usize = 30; // reserved width for the variable-name column
+    let rule = "═".repeat(INNER + 2);
+
+    let mut lines: Vec<String> = Vec::new();
+
+    // ---- Heading ----
+    lines.push(box_row("", INNER));
+    lines.push(box_row(
+        &center_text(
+            &paint("WRAPPER — Compiler Argument Wrapper Helper", &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+            INNER,
+        ),
+        INNER,
+    ));
+    lines.push(box_row(
+        &center_text(&paint("Environment variables understood by the wrapper", ansi::DIM), INNER),
+        INNER,
+    ));
+    lines.push(box_row("", INNER));
+
+    // ---- Flags & behaviour ----
+    lines.push(section_row("FLAGS & BEHAVIOUR", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_PREFER_VS",
+        "Prefer VS Studio LLVM executables over ROCm LLVM.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_BAD_FLAGS",
+        "Skip removing bad flags.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_SWAP_FLAGS",
+        "Skip swapping problematic flags.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_ADD_FLAGS",
+        "Skip adding extra helpful flags.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_SPLIT_FLAGS",
+        "Skip splitting fused flags.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_ALL_FLAGS",
+        "Skip removing bad flags, swapping problematic flags, adding extra helpful flags, and splitting fused flags.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_SKIP_VERSION_ON_EMPTY",
+        "Skip automatically adding --version when no arguments are provided.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- Response files ----
+    lines.push(section_row("RESPONSE FILES", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_ARGS_CHAR_LIMIT",
+        &format!(
+            "Override the default argument character limit of {} to enable response files.",
+            ARGS_CHAR_LIMIT
+        ),
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_FORCE_RESPONSE_FILES",
+        &format!(
+            "Force response files regardless of the total argument character length of {}.",
+            ARGS_CHAR_LIMIT
+        ),
+        NAME_W,
+        INNER,
+    ));
+// ---- Logging & debug (RUST_LOG) ----
+    lines.push(section_row("LOGGING & DEBUG (RUST_LOG)", INNER));
+    lines.extend(usage_pair(
+        "RUST_LOG",
+        "Set the diagnostic verbosity used by the wrapper. Standard env_logger variable; unset defaults to error.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "error",
+        "Log only errors. Least verbose (the default when RUST_LOG is unset).",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "warn",
+        "Log warnings and errors.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "info",
+        "Log informational messages, warnings and errors.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "debug",
+        "Log debug messages plus everything above.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "trace",
+        "Log trace messages plus everything above. Most verbose.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- Other / help ----
+    lines.push(section_row("OTHER & HELP", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_ENABLE_PASSTHROUGH",
+        "Pass arguments through directly without processing.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_OPTIONS or WRAPPER_HELP",
+        "Print this help message and exit.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- Footer ----
+    lines.push(box_row("", INNER));
+    lines.push(box_row(
+        &center_text(
+            &paint("Set any of these environment variables to enable its behaviour.", ansi::DIM),
+            INNER,
+        ),
+        INNER,
+    ));
+    lines.push(box_row("", INNER));
+
+    // ---- Assemble the box ----
+    let mut out = String::new();
+    out.push_str(&format!("╔{rule}╗\n"));
+    for line in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(&format!("╚{rule}╝"));
+
+    println!();
+    println!("{out}");
+    println!();
+
+    true
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////
-//                                   Cargo Tests                                        //
+//                                    Unit Tests                                        //
 //////////////////////////////////////////////////////////////////////////////////////////
 #[cfg(test)]
 mod tests {
@@ -414,5 +739,160 @@ mod tests {
                 "some\\suspicious\\dirname".to_string(),
             ]
         );
+    }
+
+    // Helper: a config that mimics the default (no skips) but with a large char limit so
+    // args never spill into a response file unless explicitly tested.
+    fn default_cfg() -> FilterConfig {
+        FilterConfig {
+            args_char_limit: 1_000_000,
+            ..FilterConfig::default()
+        }
+    }
+
+    // skip_split leaves fused /Fd<dir> untouched instead of splitting into two args.
+    #[test]
+    fn skip_split_keeps_fused_flag_together() {
+        let args = vec!["/Fdsome\\target\\directory".to_string()];
+        let mut cfg = default_cfg();
+        cfg.skip_split = true;
+        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        assert_eq!(result, vec!["/Fdsome\\target\\directory".to_string()]);
+    }
+
+    // Without skip_split, the fused flag still splits (sanity guard against regressions).
+    #[test]
+    fn default_splits_fused_flag() {
+        let args = vec!["/Fdsome\\target\\directory".to_string()];
+        let result = applyFilter(args, &default_cfg(), never_match(), vec![], String::new());
+        assert_eq!(
+            result,
+            vec!["/Fd".to_string(), "some\\target\\directory".to_string()]
+        );
+    }
+
+    // skip_bad keeps a flagged arg that would otherwise be dropped.
+    #[test]
+    fn skip_bad_keeps_flags_that_would_be_removed() {
+        let args = vec!["/bigobj".to_string(), "main.cpp".to_string()];
+        let bad = regex::Regex::new(r"^/bigobj$").unwrap();
+
+        let mut cfg = default_cfg();
+        cfg.skip_bad = true;
+        assert_eq!(
+            applyFilter(args.clone(), &cfg, bad.clone(), vec![], String::new()),
+            vec!["/bigobj".to_string(), "main.cpp".to_string()]
+        );
+
+        assert_eq!(
+            applyFilter(args.clone(), &default_cfg(), bad, vec![], String::new()),
+            vec!["main.cpp".to_string()]
+        );
+    }
+
+    // skip_swap keeps the original arg instead of replacing it.
+    #[test]
+    fn skip_swap_keeps_original_arg() {
+        let args = vec!["/Zi".to_string()];
+        let swaps = vec![(regex::Regex::new(r"^/Zi$").unwrap(), "-g".to_string())];
+
+        let mut cfg = default_cfg();
+        cfg.skip_swap = true;
+        assert_eq!(
+            applyFilter(args.clone(), &cfg, never_match(), swaps.clone(), String::new()),
+            vec!["/Zi".to_string()]
+        );
+
+        assert_eq!(
+            applyFilter(args.clone(), &default_cfg(), never_match(), swaps, String::new()),
+            vec!["-g".to_string()]
+        );
+    }
+
+    // skip_add prevents the extra helpful flags from being spliced in after -x.
+    #[test]
+    fn skip_add_prevents_extra_flags() {
+        let args = vec!["-x".to_string(), "a.c".to_string(), "b".to_string()];
+        let extra = "FLAG1 FLAG2".to_string();
+
+        let mut cfg = default_cfg();
+        cfg.skip_add = true;
+        assert_eq!(
+            applyFilter(args.clone(), &cfg, never_match(), vec![], extra.clone()),
+            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]
+        );
+
+        // Without skip_add the extra flags are spliced in.
+        assert_eq!(
+            applyFilter(args, &default_cfg(), never_match(), vec![], extra),
+            vec![
+                "-x".to_string(),
+                "a.c".to_string(),
+                "FLAG1".to_string(),
+                "FLAG2".to_string(),
+                "b".to_string()
+            ]
+        );
+    }
+
+    // With no arguments the wrapper auto-appends --version so the tool still prints
+    // something useful; WRAPPER_SKIP_VERSION_ON_EMPTY leaves the args list empty.
+    #[test]
+    fn skip_version_on_empty_prevents_auto_version() {
+        let empty: Vec<String> = vec![];
+
+        // Default behaviour: empty args become a lone --version.
+        assert_eq!(
+            applyFilter(empty.clone(), &default_cfg(), never_match(), vec![], String::new()),
+            vec!["--version".to_string()]
+        );
+
+        // With the skip set, nothing is appended.
+        let mut cfg = default_cfg();
+        cfg.skip_version_on_empty = true;
+        assert_eq!(
+            applyFilter(empty, &cfg, never_match(), vec![], String::new()),
+            Vec::<String>::new()
+        );
+    }
+
+    // skip-all short-circuits: every hop disabled.
+    #[test]
+    fn skip_all_flags_disables_every_step() {
+        let args = vec!["/Fdsome\\dir".to_string(), "/bigobj".to_string()];
+        let bad = regex::Regex::new(r"^/bigobj$").unwrap();
+        let mut cfg = default_cfg();
+        cfg.skip_split = true;
+        cfg.skip_bad = true;
+        cfg.skip_swap = true;
+        cfg.skip_add = true;
+        let result = applyFilter(args.clone(), &cfg, bad, vec![], "FLAG".to_string());
+        assert_eq!(result, args);
+    }
+
+    // force_response_files collapses the final args into a single @file.rsp arg.
+    #[test]
+    fn force_response_files_uses_response_file() {
+        let args = vec!["main.cpp".to_string()];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+        let rsp = result[0].strip_prefix('@').unwrap().to_string();
+        assert!(rsp.ends_with(".rsp"));
+        let _ = std::fs::remove_file(&rsp); // tidy up the generated response file
+    }
+
+    // When args exceed args_char_limit the wrapper emits a response file.
+    #[test]
+    fn args_over_char_limit_become_response_file() {
+        let args = vec!["main.cpp".to_string(), "with-a-very-long-name.cpp".to_string()];
+        let mut cfg = default_cfg();
+        cfg.args_char_limit = 10; // shorter than the joined args
+        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+        let rsp = result[0].strip_prefix('@').unwrap().to_string();
+        assert!(rsp.ends_with(".rsp"));
+        let _ = std::fs::remove_file(&rsp);
     }
 }
