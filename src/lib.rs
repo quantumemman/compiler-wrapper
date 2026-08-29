@@ -1,379 +1,439 @@
-use std::env;
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{id};
-use std::string::String;
-use std::sync::LazyLock; // for LazyLock init
-use regex::Regex;
-use log::{trace, debug, info, warn}; // import the logging macros. Options include trace, debug, info, warn, error
-pub const ARGS_CHAR_LIMIT: usize = 30000;
+use std::env;                             // for environment variables
+use std::fs::File;                        // for File operations
+use std::io::Write;                       // for Write trait
+use std::path::{Path, PathBuf};           // for Path operations
+use std::process::{id};                   // for process id
+use std::string::String;                  // for String type
+use std::sync::LazyLock;                  // for LazyLock init
+use regex::Regex;                         // for Regex operations
+use log::{trace, debug, info, warn};      // logging macros with levels: trace, debug, info, warn, error
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                              Executables Search Paths                               //
+//                         Define Executables Search Paths                             //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const MSVC_PATH: &str = env!("MSVC_PATH_");
-pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");
-pub const LLVM_PATH: &str = env!("LLVM_PATH_");
-pub const GCC_PATH: &str = env!("GCC_PATH_");
-pub const WRAPPER_PATH: &str = env!("PY_PATH_");
+pub const MSVC_PATH: &str = env!("MSVC_PATH_");           // Microsoft Visual C++ toolchain path
+pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");     // Visual Studio LLVM toolchain path
+pub const LLVM_PATH: &str = env!("LLVM_PATH_");           // Custom LLVM toolchain path
+pub const GCC_PATH: &str = env!("GCC_PATH_");             // GNU Compiler Collection path
+pub const PY_SCRIPTS_PATH: &str = env!("PY_PATH_");       // Python venv Scripts path
 pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
     // If WRAPPER_PREFER_VS is defined, prefer Visual Studio's LLVM toolchain; otherwise prefer Custom LLVM.
     if env::var("WRAPPER_PREFER_VS").is_ok() {
         info!("Preferring Visual Studio LLVM toolchain");
-        [&LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &WRAPPER_PATH] // Prefer VS LLVM
+        [&LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer VS LLVM
     } else {
         info!("Preferring Custom LLVM toolchain");
-        [&LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &WRAPPER_PATH] // Prefer Custom LLVM
+        [&LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer Custom LLVM
     }
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                                Executables Keywords                                 //
+//                            Define Executables Keywords                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static wrapperKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)ccache"#).unwrap());
-pub static compilerKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
-pub static linkerKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(link|lld|ld)"#).unwrap());
+pub static WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)ccache"#).unwrap());
+pub static EXTERNAL_WRAPPER_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)[-](rs)"#).unwrap()); // matches executable names that are external wrappers like clang-rs to avoid doing their work for them since they will be called by this program
+pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
+pub static LINKER_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(link|lld|ld)"#).unwrap());
 
-pub static llvmKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|llvm|lld)"#).unwrap());
-pub static msvcKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(cl|link)"#).unwrap());
-pub static gccKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
+pub static LLVM_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|llvm|lld)"#).unwrap());
+pub static MSVC_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(cl|link)"#).unwrap());
+pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                  Define Bad Flag Regexes, -/ start, case sensitive                  //
+//                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVMCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
-pub static MSVCCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
-pub static GCCCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#""#).unwrap());
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
+pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
+pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap());
 
-pub static LLVMLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
-pub static MSVCLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
-pub static GCCLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""#).unwrap());
+pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
+pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
+pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[-/](Werror)"#).unwrap());
 
-pub static SplitFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](Fd|Fo)"#).unwrap());
+pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](Fd|Fo)"#).unwrap());
 
-//////////////////////////////////////////////////////////////////////////////////////////
-//                             Swap Problematic Arguments                               //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVMCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+/////////////////////////////////////////////////////////////////////////////////////////
+//                             Swap Problematic Arguments                              //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub static LLVM_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[-]D[/]bigobj$").expect(BadMatchMessage), "".into()),
-        (Regex::new(r"^[/]MD\(d\)?$").expect(BadMatchMessage), "-fms-extensions".into()),
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "-g".into()),
-        (Regex::new(r"^[/]01$").expect(BadMatchMessage), "-01".into()),
-        (Regex::new(r"^[/]02$").expect(BadMatchMessage), "-02".into()),
-        (Regex::new(r"^[/]03$").expect(BadMatchMessage), "-03".into()),
-        (Regex::new(r"^[/]04$").expect(BadMatchMessage), "-04".into()),
+        (Regex::new(r"^[-]D[/]bigobj$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[/]MD\(d\)?$").expect(BAD_MATCH_MESSAGE), "-fms-extensions".into()),
+        (Regex::new(r"^[/]Zi$").expect(BAD_MATCH_MESSAGE), "-g".into()),
+        (Regex::new(r"^[/]01$").expect(BAD_MATCH_MESSAGE), "-01".into()),
+        (Regex::new(r"^[/]02$").expect(BAD_MATCH_MESSAGE), "-02".into()),
+        (Regex::new(r"^[/]03$").expect(BAD_MATCH_MESSAGE), "-03".into()),
+        (Regex::new(r"^[/]04$").expect(BAD_MATCH_MESSAGE), "-04".into()),
 ]});
 
-// Swaps: pattern regex → replacement
-pub static MSVCCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+pub static LLVM_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "/Z7".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
 ]});
 
-// Swaps: pattern regex → replacement
-pub static LLVMLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
+        (Regex::new(r"^[/]Zi$").expect(BAD_MATCH_MESSAGE), "/Z7".into()),
 ]});
 
-// Swaps: pattern regex → replacement
-pub static MSVCLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+pub static MSVC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
 ]});
 
-// Swaps: pattern regex → replacement
-pub static GCCCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+pub static GCC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "-g".into()),
+        (Regex::new(r"^[/]Zi$").expect(BAD_MATCH_MESSAGE), "-g".into()),
 ]});
 
-// Swaps: pattern regex → replacement
-pub static GCCLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
+pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
 ]});
 
-//////////////////////////////////////////////////////////////////////////////////////////
-//                                 Extraflags to tack on                                //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVMCompilerExtraFlags: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-error -Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -w";
-pub const LLVMLinkerExtraFlags: &str = "/MANIFEST:NO";
-pub const MSVCCompilerExtraFlags: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-errror=implicit-function-declaration -Wno-errror=extern-initializer -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=logical-op-parentheses -w -FS";
-pub const MSVCLinkerExtraFlags: &str = "";
-pub const GCCCompilerExtraFlags: &str = "-w";
-pub const GCCLinkerExtraFlags: &str = "";
-pub const BadMatchMessage: &str = "bad match";
-pub const ResponseFileName: &str = "wrapper.rsp";
-pub const ArgsCharLimit: usize = 30000;
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                  Define Extra Flags                                 //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-error -Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -w";
+pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-errror=implicit-function-declaration -Wno-errror=extern-initializer -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=logical-op-parentheses /wd4838 -w -FS";
+pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
+pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
+pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
+
+pub const ARGS_CHAR_LIMIT: usize = 30000;  // maximum CLI args char length before using response file
+pub const UNKNOWN_KEYWORD: &str = "UNKNOWN";
+pub const BAD_MATCH_MESSAGE: &str = "bad match";
+pub const RESPONSE_FILE_NAME: &str = "response_file.rsp";
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                       Define Compiler/Linker Classification Enums                   //
+/////////////////////////////////////////////////////////////////////////////////////////
+#[derive(Debug)]
+pub enum ExecutableFamily {
+    LLVM,        // clang, clang++, lld-link
+    MSVC,        // cl, clang-cl, link
+    GCC,         // gcc, g++, ld
+    UNKNOWN,     // default classification, sccache, ccache
+}
 
 #[derive(Debug)]
-pub enum EXEFamily {
-    LLVM,         // clang, clang++, gcc, g++, lld-link
-    MSVC,         // cl, clang-cl, link
-    GCC,          // gcc, g++, ld
-    UNKNOWN,      // default classification, sccache
+pub enum ExecutableKind {
+    COMPILER,    // clang, clang-cl, cl, gcc, g++
+    LINKER,      // link, lld-link, ld
+    WRAPPER,     // sccache, ccache, used to skip arg filtering since the exe type is unknown but not problematic
+    UNKNOWN,     // default classification, this will correspond to a new exe type
 }
 
-#[derive(Debug)]
-pub enum EXEKind {
-    COMPILER,    // compiler, e.g. clang, clang-cl, gcc, g++
-    LINKER,      // linker, e.g. link, lld-link, ld
-    UNKNOWN,     // default classification, this will throw an error
-}
-
-pub fn getName(src: &String, args: &Vec<String>) -> (String, String) {
-    let baseName = Path::new(&src).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", ".exe");
-    let mut wrapperName = "unknown".to_string();
-    let mut exeName = baseName.strip_prefix("sccache-").unwrap_or(&baseName).to_string(); // handle sccache-clang.exe, sccache-link.exe, etc.
-    if wrapperKeywords.is_match(&baseName) {
-        wrapperName = "sccache.exe".to_string();
-    }
-    if wrapperKeywords.is_match(&exeName) {
-        exeName = args.get(0).unwrap_or(&"unknown".to_string()).to_string();
-    }
-    return (wrapperName, exeName);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////
-//                                   Find file                                          //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub fn getEXE(name: &(String, String)) -> (String, String) {
-    let wrapperPath: String = findFile(&name.0, &*PATHS).unwrap_or("unknown".into()).to_str().unwrap_or("").to_string();    
-    let exePath: String = findFile(&name.1, &*PATHS).unwrap_or("unknown".into()).to_str().unwrap_or("").to_string();
-    return (wrapperPath.replace("\\", "/"), exePath.replace("\\", "/"));
-}
-
-fn findFile(name: &str, paths: &[&str]) -> Option<PathBuf> {
-    if name != "unknown" {
-        let ext = "exe";
-        for dir in paths {
-            trace!("Searching for {} in {}", name, dir);
-            let candidate = Path::new(dir).join(name).with_extension(ext);
-            trace!("Checking candidate path: {:?}", candidate);
-            if candidate.exists() && candidate.is_file() {
-                return Some(candidate.to_path_buf());
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                Get Executable Names                                 //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String>) -> (String, String) {
+    let mut wrapper_name = UNKNOWN_KEYWORD.to_string();
+    let mut executable_name = wrapper_name.clone();
+    
+    if WRAPPER_KEYWORDS.is_match(src_executable) {                                                   // matches a wrapper keyword such as sccache
+        if COMPILER_KEYWORDS.is_match(src_executable) || LINKER_KEYWORDS.is_match(src_executable) {  // e.g. sccache-clang-cl
+            if src_executable.starts_with("sccache-") {
+                wrapper_name = "sccache".to_string();
+                executable_name = src_executable.replace("sccache-", "");
+            } else if src_executable.starts_with("ccache-") {
+                wrapper_name = "ccache".to_string();
+                executable_name = src_executable.replace("ccache-", "");
             }
+        } else {                                        // this is the case of pure sccache being called
+                wrapper_name = src_executable.clone();  // keep the wrapper executable as is
+                executable_name = input_args.remove(0); // the executable should be the next arg since wrappers are not compilers or linkers
+        }
+    } else {
+        executable_name = src_executable.clone();  // there is no wrapper in this scenario so store it as the executable
+    }
+    (wrapper_name, executable_name)
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+//                                   Locate Executables                                 //
+//////////////////////////////////////////////////////////////////////////////////////////
+fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
+    if executable_name != UNKNOWN_KEYWORD {
+        if !(EXTERNAL_WRAPPER_SIGNATURE.is_match(&executable_name) || Path::new(executable_name).is_absolute()) {
+            for dir in paths {
+                // trace!("Searching for {} in {}", executable_name, dir);
+                let candidate = Path::new(dir).join(executable_name);
+                // On Windows, executables have the .exe extension; on other platforms they typically don't.
+                let candidate = if cfg!(windows) {
+                    candidate.with_extension("exe")
+                } else {
+                    candidate
+                };
+                // trace!("Checking candidate path: {:?}", candidate);
+                if candidate.exists() && candidate.is_file() {
+                    trace!("Found {} in {}", executable_name, dir);
+                    return Some(candidate.to_path_buf());
+                }
+            }
+        } else {
+            trace!("Executable is absolute or another wrapper, returning as is: {}", executable_name);
+            return Some(PathBuf::from(executable_name));
         }
     }
     None
 }
 
-// Classify the exe kind based on its name using keywords
-pub fn getEXEFamily(name: &(String, String)) -> (EXEFamily, EXEKind) {
-    let mut exeFamily = EXEFamily::UNKNOWN;
-    let mut exeKind = EXEKind::UNKNOWN;
-    
-    if name.1.contains("clang-cl") {                  // clang-cl is MSVC-compatible
-        exeFamily = EXEFamily::MSVC;
-    } else if llvmKeywords.is_match(&name.1) {        // LLVM family—add whatever shows up
-        exeFamily = EXEFamily::LLVM;
-    } else if msvcKeywords.is_match(&name.1) {        // Pure MSVC first—avoid false positives
-        exeFamily = EXEFamily::MSVC;
-    } else if gccKeywords.is_match(&name.1) {         // GCC family—add whatever shows up
-        exeFamily = EXEFamily::GCC;
-    }
-    
-    if compilerKeywords.is_match(&name.1) { // Pure compiler next—avoid false positives
-        exeKind = EXEKind::COMPILER;
-    } else if linkerKeywords.is_match(&name.1) {   // Pure MSVC first—avoid false positives
-        exeKind = EXEKind::LINKER;
-    }
-    
-    return (exeFamily, exeKind);
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                  Get Executable Paths                               //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub fn get_executable_paths(target_executable_names: &(String, String)) -> (String, String) {
+    let wrapper_path: String = find_executable(&target_executable_names.0, &*PATHS).unwrap_or(UNKNOWN_KEYWORD.into()).to_str().unwrap_or("").to_string();    
+    let executable_path: String = find_executable(&target_executable_names.1, &*PATHS).unwrap_or(UNKNOWN_KEYWORD.into()).to_str().unwrap_or("").to_string();
+    return (wrapper_path.replace("\\", "/"), executable_path.replace("\\", "/"));
 }
 
-// Regular method
-pub fn getFlags(family: &(EXEFamily, EXEKind)) -> (Regex, Vec<(Regex, String)>, &str) {
+/////////////////////////////////////////////////////////////////////////////////////////
+//                      Determine Main and Deputy Executable Paths                     //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub fn get_main_and_deputy_executable_paths(target_executable_names: &(String, String)) -> (String, String) {
+    let deputy_executable: String = target_executable_names.1.clone();
+    let main_executable : String = if target_executable_names.0 != UNKNOWN_KEYWORD { target_executable_names.0.clone() } else { deputy_executable.clone() };
+    (main_executable, deputy_executable)
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+//                               Classify Executable Types                                   //
+///////////////////////////////////////////////////////////////////////////////////////////////
+// Classify the exe kind based on its name matching keywords
+pub fn get_target_classification(executable_name: &String) -> (ExecutableFamily, ExecutableKind) {
+    let mut executable_family = ExecutableFamily::UNKNOWN;
+    let mut executable_kind = ExecutableKind::UNKNOWN;
+    
+    if executable_name.contains("clang-cl") {               // clang-cl should be treated as MSVC but would trigger LLVM so check it first
+        executable_family = ExecutableFamily::MSVC;
+    } else if LLVM_KEYWORDS.is_match(executable_name) {     // LLVM family
+        executable_family = ExecutableFamily::LLVM;
+    } else if MSVC_KEYWORDS.is_match(executable_name) {     // MSVC family
+        executable_family = ExecutableFamily::MSVC;
+    } else if GCC_KEYWORDS.is_match(executable_name) {      // GCC family
+        executable_family = ExecutableFamily::GCC;
+    }
+    
+    if COMPILER_KEYWORDS.is_match(executable_name) {        // prioritize compilers since it is the most in need of this wrapper
+        executable_kind = ExecutableKind::COMPILER;
+    } else if LINKER_KEYWORDS.is_match(executable_name) {   // next do linker
+        executable_kind = ExecutableKind::LINKER;
+    }
+    
+    (executable_family, executable_kind)
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                            Get the Arguments Filter Pack                            //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub fn get_args_filter_pack(family: &(ExecutableFamily, ExecutableKind)) -> (Regex, Vec<(Regex, String)>, &str) {
     match family {
-        (EXEFamily::LLVM, EXEKind::COMPILER) => (LLVMCompilerBadFlags.clone(), LLVMCompilerSwapPairs.clone(), LLVMCompilerExtraFlags),
-        (EXEFamily::MSVC, EXEKind::COMPILER) => (MSVCCompilerBadFlags.clone(), MSVCCompilerSwapPairs.clone(), MSVCCompilerExtraFlags),
-        (EXEFamily::GCC, EXEKind::COMPILER) => (GCCCompilerBadFlags.clone(), GCCCompilerSwapPairs.clone(), GCCCompilerExtraFlags),
-        (EXEFamily::LLVM, EXEKind::LINKER) => (LLVMLinkerBadFlags.clone(), LLVMLinkerSwapPairs.clone(), LLVMLinkerExtraFlags),
-        (EXEFamily::MSVC, EXEKind::LINKER) => (MSVCLinkerBadFlags.clone(), MSVCLinkerSwapPairs.clone(), MSVCLinkerExtraFlags),
-        (EXEFamily::GCC, EXEKind::LINKER) => (GCCLinkerBadFlags.clone(), GCCLinkerSwapPairs.clone(), GCCLinkerExtraFlags),
-        _ => panic!("Invalid family and kind"), // Add this later if needed
+        (ExecutableFamily::LLVM, ExecutableKind::COMPILER) => (LLVM_COMPILER_BAD_FLAGS.clone(), LLVM_COMPILER_SWAP_PAIRS.clone(), LLVM_COMPILER_EXTRA_FLAGS),
+        (ExecutableFamily::MSVC, ExecutableKind::COMPILER) => (MSVC_COMPILER_BAD_FLAGS.clone(), MSVC_COMPILER_SWAP_PAIRS.clone(), MSVC_COMPILER_EXTRA_FLAGS),
+        (ExecutableFamily::GCC, ExecutableKind::COMPILER) => (GCC_COMPILER_BAD_FLAGS.clone(), GCC_COMPILER_SWAP_PAIRS.clone(), GCC_COMPILER_EXTRA_FLAGS),
+        (ExecutableFamily::LLVM, ExecutableKind::LINKER) => (LLVM_LINKER_BAD_FLAGS.clone(), LLVM_LINKER_SWAP_PAIRS.clone(), LLVM_LINKER_EXTRA_FLAGS),
+        (ExecutableFamily::MSVC, ExecutableKind::LINKER) => (MSVC_LINKER_BAD_FLAGS.clone(), MSVC_LINKER_SWAP_PAIRS.clone(), MSVC_LINKER_EXTRA_FLAGS),
+        (ExecutableFamily::GCC, ExecutableKind::LINKER) => (GCC_LINKER_BAD_FLAGS.clone(), GCC_LINKER_SWAP_PAIRS.clone(), GCC_LINKER_EXTRA_FLAGS),
+        _ => panic!("Invalid executable family and kind"), // Add new cases when triggered
     }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                   Filter Arguments                                  //
 /////////////////////////////////////////////////////////////////////////////////////////
+pub fn filter_args(input_args: Vec<String>, bad_flags: &Regex, swap_pairs: &Vec<(Regex, String)>, extra_flags: &String) -> Vec<String> {
+    // Pass through everything untouched, no processing whatsoever.
+    if env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() {
+        return input_args;
+    }
+    let config = FilterConfig::from_env();
+    apply_filter(input_args, &config, &bad_flags, &swap_pairs, &extra_flags)
+}
+
+// Applies the filtering pipeline described by `config`. Pure aside from writing the response file when args get too long (or are forced through).
+fn apply_filter(input_args: Vec<String>, config: &FilterConfig, bad_flags: &Regex, swap_pairs: &Vec<(Regex, String)>, extra_flags: &String) -> Vec<String> {
+    // Split fused flag+directory args (e.g. /Fdsome\target\directory -> /Fd + some\target\directory)
+    // BEFORE the swap/bad loop, because one fused arg expands into two and the array grows.
+    // An arg that is exactly the flag (already standalone) passes through unchanged.
+    let mut expanded_args: Vec<String> = Vec::new();
+    if !config.skip_split {
+        for arg in input_args {
+            if let Some(cap) = COMMON_SPLIT_FLAGS.captures(&arg) {
+                let full = cap.get(0).unwrap().as_str();
+                if full.len() < arg.len() {                       // fused flag + directory
+                    expanded_args.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
+                    expanded_args.push(arg[full.len()..].to_string()); // directory part
+                } else {                                          // exactly /Fd or /Fo
+                    expanded_args.push(arg);
+                }
+            } else {
+                expanded_args.push(arg);
+            }
+        }
+    } else {
+        expanded_args = input_args;
+    }
+
+    // final arguments
+    let mut final_args: Vec<String> = Vec::new();
+    for arg in expanded_args {
+        if !config.skip_bad && bad_flags.is_match(&arg) { continue; } // Drop if bad
+        let mut new_arg = arg.clone();                             // Swap if match
+        if !config.skip_swap {
+            for (re, swap) in &*swap_pairs {
+                if re.is_match(&arg) {
+                    new_arg = re.replace(&arg, swap.clone()).trim().to_string();
+                    break;
+                }
+            }
+        }
+        if !new_arg.is_empty() {
+            final_args.push(new_arg);
+        }
+    }
+
+    if final_args.is_empty() && !config.skip_version_on_empty {
+        final_args.push("--version".into());
+    } else if !config.skip_add && final_args.len() > 1 && !extra_flags.is_empty() && final_args.iter().any(|a| a == "-x") {
+        let index = final_args.iter().position(|a| a == "-x").unwrap();
+        if final_args[index + 2] != extra_flags.split(" ").next().unwrap() {  // Avoid inserting extra flags twice
+            final_args.splice(index + 2..index + 2, extra_flags.split(" ").map(|s| s.into()));
+        }
+    }
+
+    if final_args.iter().any(|a| a.starts_with('@')) {
+        // rsp already used — pass through
+        info!("Response file already in use. Pass through.");
+    } else if config.force_response_files || final_args.join(" ").len() > config.args_char_limit {
+        // too long (or forced): make rsp
+        // Use an absolute path in the temp directory so the spawned compiler can
+        // always find the file regardless of its working directory.
+        let rsp_name = RESPONSE_FILE_NAME.replace(".rsp", &format!("_{}.rsp", id()));
+        let rsp_path = env::temp_dir().join(&rsp_name);
+        warn!("Creating response file: {}.", rsp_path.display());
+        let mut f = File::create(&rsp_path).unwrap();
+        for arg in &final_args { writeln!(f, "{}", arg).unwrap(); }
+        final_args = vec![format!("@{}", rsp_path.display())];
+    }
+    return final_args;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                   Define the Runtime struct to hold runtime info                    //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub struct Runtime {
+    pub src_file: String,                      // "src/executable-name.rs" e.g. "src/clang-cl.rs"
+    pub src_executable: String,                // "executable-name-rs.exe" e.g. "clang-cl-rs.exe"
+    pub input_args: Vec<String>,               // (arg1, arg2, arg3, ...) e.g. ("/bigobj", "-c", "file.cpp")
+    pub target_executable_names: (String, String), // ("wrapper-name.exe", "executable-name.exe") e.g. ("sccache.exe", "clang-cl.exe")
+    pub target_executable_paths: (String, String), // ("/path/to/wrapper-name.exe", "/path/to/executable-name.exe") e.g. ("/path/to/sccache.exe", "/path/to/clang-cl.exe")
+    pub target_classification: (ExecutableFamily, ExecutableKind), // (LLVM, Compiler), (LLVM, Linker), (MSVC, Compiler), (MSVC, Linker), (UNKNOWN, UNKNOWN)
+    pub main_exe: String,                      // "/path/to/main.exe", left-most valid executable in target_executable_paths e.g. "/path/to/sccache.exe"
+    pub deputy_exe: String,                    // "/path/to/deputy.exe", right-most valid executable in target_executable_paths, e.g. "/path/to/clang-cl.exe", may be main.exe or even the first arg in final_args
+    pub final_args: Vec<String>,               // (arg1, arg2, arg3, ...) e.g. ("-D/bigobj", "-c", "file.cpp")
+    pub expect: String,                        // "executable-name.exe died" e.g. "clang-cl.exe died"
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                           Define the Runtime struct methods                         //
+/////////////////////////////////////////////////////////////////////////////////////////
+// Impl block = where methods live
+impl Runtime {
+    // Constructor
+    pub fn new(src_file: String, mut input_args: Vec<String>) -> Self {
+        let mut final_args: Vec<String>;
+        let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", "");  // executables end in .exe on Windows but not on other platforms.
+        trace!("Src executable: {}", src_executable);
+        
+        let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
+        trace!("Target executable names: {:?}", target_executable_names);
+        
+        let target_executable_paths: (String, String) = get_executable_paths(&target_executable_names);
+        trace!("Target executable paths: {:?}", target_executable_paths);
+        
+        let (main_exe, deputy_exe): (String, String) = get_main_and_deputy_executable_paths(&target_executable_paths);
+        trace!("Main exe: {}, Deputy exe: {}", main_exe, deputy_exe);
+        
+        let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&deputy_exe);
+        trace!("Target classification: {:?}", target_classification);
+        
+        let (bad_flags, swap_pairs, extra_flags) = get_args_filter_pack(&target_classification);
+        
+        if !EXTERNAL_WRAPPER_SIGNATURE.is_match(&deputy_exe) {
+            final_args = filter_args(input_args.clone(), &bad_flags, &swap_pairs, &extra_flags.to_string());
+        } else {
+            final_args = input_args.clone()
+        }
+        
+        if target_executable_names.0 != UNKNOWN_KEYWORD {final_args.insert(0, deputy_exe.clone())}
+        let expect: String = deputy_exe.clone() + " died";
+
+        Runtime {
+            src_file: src_file,
+            src_executable: src_executable,
+            input_args: input_args,
+            target_executable_names: target_executable_names,
+            target_executable_paths: target_executable_paths,
+            target_classification: target_classification,
+            main_exe: main_exe,
+            deputy_exe: deputy_exe,
+            final_args: final_args,
+            expect: expect,
+        }
+    }
+
+    pub fn print_info(&self) {
+        trace!("Src File: {}", self.src_file);
+        trace!("Src Executable: {}", self.src_executable);
+        trace!("Input Args: {:?}", self.input_args);
+        trace!("Target Executable Names: {:?}", self.target_executable_names);
+        info!("Target Executable Paths: {:?}", self.target_executable_paths);
+        info!("Target Classification: {:?}", self.target_classification);
+        debug!("Final Args: {:?}", self.final_args);
+        trace!("Expect: {}", self.expect);
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                Define FilterConfig struct to Process Env Var Options                //
+/////////////////////////////////////////////////////////////////////////////////////////
 // Per-call configuration controlling which filtering steps run. Derived from env vars
-// in `filterArgs`; kept as data so the pure logic in `applyFilter` is unit-testable
+// in `filter_args`; kept as data so the pure logic in `applyFilter` is unit-testable
 // without mutating global process environment (which is unsafe across parallel tests).
 #[derive(Default)]
 pub struct FilterConfig {
-    pub skip_split: bool,           // skip splitting fused /Fd<dir> /Fo<dir> flags
-    pub skip_bad: bool,             // skip removing bad flags
-    pub skip_swap: bool,            // skip swapping problematic flags
-    pub skip_add: bool,             // skip appending extra helpful flags
+    pub skip_split: bool,            // skip splitting fused /Fd<dir> /Fo<dir> flags
+    pub skip_bad: bool,              // skip removing bad flags
+    pub skip_swap: bool,             // skip swapping problematic flags
+    pub skip_add: bool,              // skip appending extra helpful flags
     pub skip_version_on_empty: bool, // skip auto-adding --version when args is empty
-    pub force_response_files: bool, // always use a response file (regardless of length)
-    pub args_char_limit: usize,     // override for the argument character limit
+    pub force_response_files: bool,  // always use a response file (regardless of length)
+    pub args_char_limit: usize,      // override for the argument character limit
 }
 
 impl FilterConfig {
     // Reads the WRAPPER_* environment variables into a FilterConfig.
     pub fn from_env() -> Self {
-        let skipAll = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
+        let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
-            skip_split: skipAll || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
-            skip_bad: skipAll || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
-            skip_swap: skipAll || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
-            skip_add: skipAll || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
+            skip_split: skip_all || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
+            skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
+            skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
+            skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
             skip_version_on_empty: env::var("WRAPPER_SKIP_VERSION_ON_EMPTY").is_ok(),
             force_response_files: env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
-            args_char_limit: FilterConfig::argsCharLimit(),
+            args_char_limit: FilterConfig::get_args_char_limit(),
         }
     }
 
     // Resolves the effective character limit, honoring WRAPPER_ARGS_CHAR_LIMIT.
-    fn argsCharLimit() -> usize {
+    fn get_args_char_limit() -> usize {
         match env::var("WRAPPER_ARGS_CHAR_LIMIT") {
             Ok(v) => v.trim().parse::<usize>().unwrap_or(ARGS_CHAR_LIMIT),
             Err(_) => ARGS_CHAR_LIMIT,
         }
-    }
-}
-
-pub fn filterArgs(args: Vec<String>, BadFlags: Regex, SwapPairs: Vec<(Regex, String)>, ExtraFlags: String) -> Vec<String> {
-    let config = FilterConfig::from_env();
-    applyFilter(args, &config, BadFlags, SwapPairs, ExtraFlags)
-}
-
-// Applies the filtering pipeline described by `config`. Pure aside from writing the
-// response file when args get too long (or are forced through).
-fn applyFilter(
-    args: Vec<String>,
-    config: &FilterConfig,
-    BadFlags: Regex,
-    SwapPairs: Vec<(Regex, String)>,
-    ExtraFlags: String,
-) -> Vec<String> {
-    // Split fused flag+directory args (e.g. /Fdsome\target\directory -> /Fd + some\target\directory)
-    // BEFORE the swap/bad loop, because one fused arg expands into two and the array grows.
-    // An arg that is exactly the flag (already standalone) passes through unchanged.
-    let mut expanded: Vec<String> = Vec::new();
-    if !config.skip_split {
-        for arg in args {
-            if let Some(cap) = SplitFlags.captures(&arg) {
-                let full = cap.get(0).unwrap().as_str();
-                if full.len() < arg.len() {                       // fused flag + directory
-                    expanded.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
-                    expanded.push(arg[full.len()..].to_string()); // directory part
-                } else {                                          // exactly /Fd or /Fo
-                    expanded.push(arg);
-                }
-            } else {
-                expanded.push(arg);
-            }
-        }
-    } else {
-        expanded = args;
-    }
-
-    // final arguments
-    let mut finalArgs: Vec<String> = Vec::new();
-    for arg in expanded {
-        if !config.skip_bad && BadFlags.is_match(&arg) { continue; } // Drop if bad
-        let mut newArg = arg.clone();                             // Swap if match
-        if !config.skip_swap {
-            for (re, swap) in &*SwapPairs {
-                if re.is_match(&arg) {
-                    newArg = re.replace(&arg, swap.clone()).trim().to_string();
-                    break;
-                }
-            }
-        }
-        if !newArg.is_empty() {
-            finalArgs.push(newArg);
-        }
-    }
-
-    if finalArgs.is_empty() && !config.skip_version_on_empty {
-        finalArgs.push("--version".into());
-    } else if !config.skip_add
-        && finalArgs.len() > 1
-        && !ExtraFlags.is_empty()
-        && finalArgs.iter().any(|a| a == "-x")
-    {
-        let index = finalArgs.iter().position(|a| a == "-x").unwrap();
-        if finalArgs[index + 2] != ExtraFlags.split(" ").next().unwrap() {  // Avoid inserting extra flags twice
-            finalArgs.splice(index + 2..index + 2, ExtraFlags.split(" ").map(|s| s.into())); }
-    }
-
-    if finalArgs.iter().any(|a| a.starts_with('@')) {
-        // rsp already used—pass through
-    } else if config.force_response_files || finalArgs.join(" ").len() > config.args_char_limit {
-        // too long (or forced): make rsp
-        let rsp_path = &ResponseFileName.replace(".rsp", &format!("_{}.rsp", id()).to_owned());
-        let mut f = File::create(&rsp_path).unwrap();
-        for arg in &finalArgs { writeln!(f, "{}", arg).unwrap(); }  // or space/newline
-        finalArgs = vec![format!("@{}", &rsp_path)];
-    }
-    return finalArgs;
-}
-
-// Define the struct (your "class")
-pub struct Kind {
-    pub exe: String,                  // "name-rs.exe"
-    pub src: String,                  // "src/name.rs"
-    pub args: Vec<String>,            // (arg1, arg2, arg3, ...)
-    pub name: (String, String),       // ("wrapper.exe", "name.exe")
-    pub EXE: (String, String),        // ("C:/path/to/wrapper/bin/wrapper.exe", "C:/path/to/llvm/bin/name.exe")
-    pub family: (EXEFamily, EXEKind), // (LLVM, Compiler), (LLVM, Linker), (MSVC, Compiler), (MSVC, Linker), (UNKNOWN, UNKNOWN)
-    pub finalArgs: Vec<String>,       // (arg1, arg2, arg3, ...)
-    pub expect: String,               // "name died"
-}
-
-// Impl block = where methods live
-impl Kind {
-    // Constructor
-    pub fn new(src: String, args: Vec<String>) -> Self {
-        let exe: String = env::current_exe().expect("name.exe").to_str().unwrap_or("").to_string().replace("\\", "/");
-        let src: String = src.replace("\\", "/");
-        let args: Vec<String> = args;
-        let name: (String, String) = getName(&src, &args);
-        let EXE: (String, String) = getEXE(&name);
-        let family: (EXEFamily, EXEKind) = getEXEFamily(&name);
-        let (regex, swap_pairs, extra_flags) = getFlags(&family);
-        let finalArgs: Vec<String> = filterArgs(args.clone(), regex, swap_pairs, extra_flags.to_string());
-        let expect: String = name.1.clone() + " died";
-        
-        Kind {
-            exe,
-            src,
-            args,
-            name,
-            EXE,
-            family,
-            finalArgs,
-            expect,
-        }
-    }
-    
-    pub fn getEXE(&self) -> String {
-        let (wrapper, exe) = &self.EXE;
-        if wrapper != "unknown" {
-            return wrapper.clone();
-        } else if exe != "unknown" {
-            return exe.clone();
-        }
-        return "unknown".to_string();
-    }
-
-    pub fn printInfo(&self) {
-        trace!("Received Exe: {}", self.exe);
-        trace!("Src File : {}", self.src);
-        trace!("Input Args: {:?}", self.args);
-        trace!("Processed Name: {:?}", self.name);
-        info!("Found EXE: {:?}", self.EXE);
-        info!("Family: {:?}", self.family);
-        debug!("FinalArgs: {:?}", self.finalArgs);
-        trace!("Expect: {}", self.expect);
     }
 }
 
@@ -491,7 +551,7 @@ fn section_row(title: &str, inner: usize) -> String {
 
 /// Prints the wrapper usage/help message when `WRAPPER_OPTIONS` or `WRAPPER_HELP` is set.
 /// Returns `true` if the help message was shown (so the caller can exit), `false` otherwise.
-pub fn printUsage() -> bool {
+pub fn print_usage() -> bool {
     if !(env::var("WRAPPER_OPTIONS").is_ok() || env::var("WRAPPER_HELP").is_ok()) {
         return false;
     }
@@ -582,7 +642,8 @@ pub fn printUsage() -> bool {
         NAME_W,
         INNER,
     ));
-// ---- Logging & debug (RUST_LOG) ----
+
+    // ---- Logging & debug (RUST_LOG) ----
     lines.push(section_row("LOGGING & DEBUG (RUST_LOG)", INNER));
     lines.extend(usage_pair(
         "RUST_LOG",
@@ -684,12 +745,12 @@ mod tests {
     // Split fused flag+directory: /Fd<path> and /Fo<path> become two args.
     #[test]
     fn splits_fused_flag_and_directory() {
-        let args = vec![
+        let input_args = vec![
             "/Fdsome\\target\\directory".to_string(),
             "/Foanother\\target\\directory".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filterArgs(args, never_match(), vec![], String::new());
+        let result = filter_args(input_args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
@@ -705,12 +766,12 @@ mod tests {
     // Standalone flags pass through unchanged.
     #[test]
     fn passes_through_standalone_flags() {
-        let args = vec![
+        let input_args = vec![
             "/Fd".to_string(),
             "/Fo".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filterArgs(args, never_match(), vec![], String::new());
+        let result = filter_args(input_args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
@@ -726,21 +787,21 @@ mod tests {
     fn splits_case_insensitive_prefix() {
         let fused = vec!["/Fodist\\lib.obj".to_string()];
         assert_eq!(
-            filterArgs(fused, never_match(), vec![], String::new()),
+            filter_args(fused, never_match(), vec![], String::new()),
             vec!["/Fo".to_string(), "dist\\lib.obj".to_string()]
         );
     }
 
-    // Mixed real-world input: -clang: prefixed args pass through unchanged (they start with
+    // Mixed real-world input: -clang: prefixed input_args pass through unchanged (they start with
     // '-', not '/'), only the leading /Fd fused flag+path splits.
     #[test]
     fn passes_clang_prefixed_and_splits_fd() {
-        let args = vec![
+        let input_args = vec![
             "-clang:-MSmy\\target\\dir.name\\myname\\".to_string(),
             "-clang:/FoCMakeLists\\my\\sussy.dir\\".to_string(),
             "/Fdsome\\suspicious\\dirname".to_string(),
         ];
-        let result = filterArgs(args, never_match(), vec![], String::new());
+        let result = filter_args(input_args, never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec![
@@ -753,7 +814,7 @@ mod tests {
     }
 
     // Helper: a config that mimics the default (no skips) but with a large char limit so
-    // args never spill into a response file unless explicitly tested.
+    // input_args never spill into a response file unless explicitly tested.
     fn default_cfg() -> FilterConfig {
         FilterConfig {
             args_char_limit: 1_000_000,
@@ -764,18 +825,18 @@ mod tests {
     // skip_split leaves fused /Fd<dir> untouched instead of splitting into two args.
     #[test]
     fn skip_split_keeps_fused_flag_together() {
-        let args = vec!["/Fdsome\\target\\directory".to_string()];
+        let input_args = vec!["/Fdsome\\target\\directory".to_string()];
         let mut cfg = default_cfg();
         cfg.skip_split = true;
-        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        let result = applyFilter(input_args, &cfg, never_match(), vec![], String::new());
         assert_eq!(result, vec!["/Fdsome\\target\\directory".to_string()]);
     }
 
     // Without skip_split, the fused flag still splits (sanity guard against regressions).
     #[test]
     fn default_splits_fused_flag() {
-        let args = vec!["/Fdsome\\target\\directory".to_string()];
-        let result = applyFilter(args, &default_cfg(), never_match(), vec![], String::new());
+        let input_args = vec!["/Fdsome\\target\\directory".to_string()];
+        let result = applyFilter(input_args, &default_cfg(), never_match(), vec![], String::new());
         assert_eq!(
             result,
             vec!["/Fd".to_string(), "some\\target\\directory".to_string()]
@@ -785,18 +846,18 @@ mod tests {
     // skip_bad keeps a flagged arg that would otherwise be dropped.
     #[test]
     fn skip_bad_keeps_flags_that_would_be_removed() {
-        let args = vec!["/bigobj".to_string(), "main.cpp".to_string()];
+        let input_args = vec!["/bigobj".to_string(), "main.cpp".to_string()];
         let bad = regex::Regex::new(r"^/bigobj$").unwrap();
 
         let mut cfg = default_cfg();
         cfg.skip_bad = true;
         assert_eq!(
-            applyFilter(args.clone(), &cfg, bad.clone(), vec![], String::new()),
+            apply_filter(input_args.clone(), &cfg, bad.clone(), vec![], String::new()),
             vec!["/bigobj".to_string(), "main.cpp".to_string()]
         );
 
         assert_eq!(
-            applyFilter(args.clone(), &default_cfg(), bad, vec![], String::new()),
+            apply_filter(input_args.clone(), &default_cfg(), bad, vec![], String::new()),
             vec!["main.cpp".to_string()]
         );
     }
@@ -804,18 +865,18 @@ mod tests {
     // skip_swap keeps the original arg instead of replacing it.
     #[test]
     fn skip_swap_keeps_original_arg() {
-        let args = vec!["/Zi".to_string()];
+        let input_args = vec!["/Zi".to_string()];
         let swaps = vec![(regex::Regex::new(r"^/Zi$").unwrap(), "-g".to_string())];
 
         let mut cfg = default_cfg();
         cfg.skip_swap = true;
         assert_eq!(
-            applyFilter(args.clone(), &cfg, never_match(), swaps.clone(), String::new()),
+            apply_filter(input_args.clone(), &cfg, never_match(), swaps.clone(), String::new()),
             vec!["/Zi".to_string()]
         );
 
         assert_eq!(
-            applyFilter(args.clone(), &default_cfg(), never_match(), swaps, String::new()),
+            apply_filter(input_args.clone(), &default_cfg(), never_match(), swaps, String::new()),
             vec!["-g".to_string()]
         );
     }
@@ -823,19 +884,19 @@ mod tests {
     // skip_add prevents the extra helpful flags from being spliced in after -x.
     #[test]
     fn skip_add_prevents_extra_flags() {
-        let args = vec!["-x".to_string(), "a.c".to_string(), "b".to_string()];
+        let input_args = vec!["-x".to_string(), "a.c".to_string(), "b".to_string()];
         let extra = "FLAG1 FLAG2".to_string();
 
         let mut cfg = default_cfg();
         cfg.skip_add = true;
         assert_eq!(
-            applyFilter(args.clone(), &cfg, never_match(), vec![], extra.clone()),
+            apply_filter(input_args.clone(), &cfg, never_match(), vec![], extra.clone()),
             vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]
         );
 
         // Without skip_add the extra flags are spliced in.
         assert_eq!(
-            applyFilter(args, &default_cfg(), never_match(), vec![], extra),
+            apply_filter(input_args, &default_cfg(), never_match(), vec![], extra),
             vec![
                 "-x".to_string(),
                 "a.c".to_string(),
@@ -847,14 +908,14 @@ mod tests {
     }
 
     // With no arguments the wrapper auto-appends --version so the tool still prints
-    // something useful; WRAPPER_SKIP_VERSION_ON_EMPTY leaves the args list empty.
+    // something useful; WRAPPER_SKIP_VERSION_ON_EMPTY leaves the input_args list empty.
     #[test]
     fn skip_version_on_empty_prevents_auto_version() {
         let empty: Vec<String> = vec![];
 
         // Default behavior: empty args become a lone --version.
         assert_eq!(
-            applyFilter(empty.clone(), &default_cfg(), never_match(), vec![], String::new()),
+            apply_filter(empty.clone(), &default_cfg(), never_match(), vec![], String::new()),
             vec!["--version".to_string()]
         );
 
@@ -862,7 +923,7 @@ mod tests {
         let mut cfg = default_cfg();
         cfg.skip_version_on_empty = true;
         assert_eq!(
-            applyFilter(empty, &cfg, never_match(), vec![], String::new()),
+            apply_filter(empty, &cfg, never_match(), vec![], String::new()),
             Vec::<String>::new()
         );
     }
@@ -870,25 +931,25 @@ mod tests {
     // skip-all short-circuits: every hop disabled.
     #[test]
     fn skip_all_flags_disables_every_step() {
-        let args = vec!["/Fdsome\\dir".to_string(), "/bigobj".to_string()];
+        let input_args = vec!["/Fdsome\\dir".to_string(), "/bigobj".to_string()];
         let bad = regex::Regex::new(r"^/bigobj$").unwrap();
         let mut cfg = default_cfg();
         cfg.skip_split = true;
         cfg.skip_bad = true;
         cfg.skip_swap = true;
         cfg.skip_add = true;
-        let result = applyFilter(args.clone(), &cfg, bad, vec![], "FLAG".to_string());
-        assert_eq!(result, args);
+        let result = apply_filter(input_args.clone(), &cfg, bad, vec![], "FLAG".to_string());
+        assert_eq!(result, input_args);
     }
 
-    // force_response_files collapses the final args into a single @file.rsp arg.
+    // force_response_files collapses the final input_args into a single @file.rsp arg.
     #[test]
     fn force_response_files_uses_response_file() {
         let _guard = RSP_MUTEX.lock().unwrap();
         let args = vec!["main.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
@@ -906,7 +967,7 @@ mod tests {
         let args = vec!["main.cpp".to_string(), "with-a-very-long-name.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.args_char_limit = 10; // shorter than the joined args
-        let result = applyFilter(args, &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
@@ -929,7 +990,7 @@ mod tests {
         ];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = applyFilter(args.clone(), &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
         assert_eq!(result.len(), 1);
 
         let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
@@ -960,7 +1021,7 @@ mod tests {
         ];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = applyFilter(args.clone(), &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
         assert_eq!(result.len(), 1);
 
         let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
@@ -971,6 +1032,80 @@ mod tests {
         for (line, expected) in lines.iter().zip(args.iter()) {
             assert_eq!(line, expected);
         }
+
+        let _ = std::fs::remove_file(&rsp_path);
+    }
+
+    // When the first arg is a tool name (e.g. "sccache", "clang"), it should be
+    // extracted as a prefix and NOT appear in the response file.
+    #[test]
+    fn leading_tool_arg_extracted_as_prefix() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+        let args = vec![
+            "sccache".to_string(),
+            "-O2".to_string(),
+            "main.cpp".to_string(),
+        ];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+
+        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
+        let content = std::fs::read_to_string(&rsp_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // "sccache" must NOT be in the response file
+        assert!(!lines.contains(&"sccache"), "response file should not contain the tool name");
+        // Only the remaining args should be present
+        assert_eq!(lines, vec!["-O2", "main.cpp"]);
+
+        let _ = std::fs::remove_file(&rsp_path);
+    }
+
+    // When the first arg is NOT a tool name, no prefix is extracted.
+    #[test]
+    fn non_tool_arg_not_extracted() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+        let args = vec![
+            "-O2".to_string(),
+            "main.cpp".to_string(),
+        ];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+
+        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
+        let content = std::fs::read_to_string(&rsp_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // All args should be present (no prefix extracted)
+        assert_eq!(lines, vec!["-O2", "main.cpp"]);
+
+        let _ = std::fs::remove_file(&rsp_path);
+    }
+
+    // Tool name with .exe extension is also recognized and extracted.
+    #[test]
+    fn leading_tool_arg_with_exe_extracted() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+        let args = vec![
+            "clang.exe".to_string(),
+            "-c".to_string(),
+            "test.cpp".to_string(),
+        ];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+
+        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
+        let content = std::fs::read_to_string(&rsp_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        assert!(!lines.contains(&"clang.exe"), "response file should not contain the tool name");
+        assert_eq!(lines, vec!["-c", "test.cpp"]);
 
         let _ = std::fs::remove_file(&rsp_path);
     }
