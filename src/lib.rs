@@ -6,7 +6,7 @@ use std::process::{id};
 use std::string::String;
 use std::sync::LazyLock; // for LazyLock init
 use regex::Regex;
-use log::{trace, debug, info}; // import the logging macros. Options include trace, debug, info, warn, error
+use log::{trace, debug, info, warn}; // import the logging macros. Options include trace, debug, info, warn, error
 pub const ARGS_CHAR_LIMIT: usize = 30000;
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -666,6 +666,13 @@ pub fn printUsage() -> bool {
 mod tests {
     use super::*;
 
+    use std::sync::Mutex;
+
+    // Serializes response-file tests: the response file name embeds the process
+    // id (same for every test thread), so parallel tests would clobber each
+    // other's files. Holding this mutex ensures create→read→delete is atomic.
+    static RSP_MUTEX: Mutex<()> = Mutex::new(());
+
     fn never_match() -> Regex {
         regex::Regex::new(r"\P{any}").unwrap() // matches no character; never matches anything
     }
@@ -873,6 +880,7 @@ mod tests {
     // force_response_files collapses the final args into a single @file.rsp arg.
     #[test]
     fn force_response_files_uses_response_file() {
+        let _guard = RSP_MUTEX.lock().unwrap();
         let args = vec!["main.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
@@ -880,12 +888,17 @@ mod tests {
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
-        let _ = std::fs::remove_file(&rsp); // tidy up the generated response file
+        // Response file must be an absolute path in the temp directory
+        let path = std::path::Path::new(&rsp);
+        assert!(path.is_absolute(), "response file path should be absolute, got: {}", rsp);
+        assert!(rsp.contains("linker_reponse_"), "response file name should contain prefix, got: {}", rsp);
+        let _ = std::fs::remove_file(&rsp);
     }
 
     // When args exceed args_char_limit the wrapper emits a response file.
     #[test]
     fn args_over_char_limit_become_response_file() {
+        let _guard = RSP_MUTEX.lock().unwrap();
         let args = vec!["main.cpp".to_string(), "with-a-very-long-name.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.args_char_limit = 10; // shorter than the joined args
@@ -893,6 +906,68 @@ mod tests {
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
+        let path = std::path::Path::new(&rsp);
+        assert!(path.is_absolute(), "response file path should be absolute, got: {}", rsp);
         let _ = std::fs::remove_file(&rsp);
+    }
+
+    // Verifies the response file round-trip: args written to the .rsp file are
+    // exactly the input args, one per line, in order.
+    #[test]
+    fn response_file_content_matches_args() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+        let args = vec![
+            "-O2".to_string(),
+            "-I/usr/local/include".to_string(),
+            "main.cpp".to_string(),
+            "-o".to_string(),
+            "output.exe".to_string(),
+        ];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = applyFilter(args.clone(), &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+
+        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
+        assert!(rsp_path.ends_with(".rsp"));
+        assert!(std::path::Path::new(&rsp_path).is_absolute());
+
+        // Read the response file back and verify each line matches the original args
+        let content = std::fs::read_to_string(&rsp_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), args.len());
+        for (line, expected) in lines.iter().zip(args.iter()) {
+            assert_eq!(line, expected);
+        }
+
+        let _ = std::fs::remove_file(&rsp_path);
+    }
+
+    // Verifies that args with special characters (spaces, dashes, paths) survive the round-trip.
+    #[test]
+    fn response_file_handles_special_arg_characters() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+        let args = vec![
+            "-DFOO=bar".to_string(),
+            "-isystemC:\\Program Files\\Include".to_string(),
+            "/Fd".to_string(),
+            "C:\\My Projects\\debug\\".to_string(),
+            "-std=c++20".to_string(),
+        ];
+        let mut cfg = default_cfg();
+        cfg.force_response_files = true;
+        let result = applyFilter(args.clone(), &cfg, never_match(), vec![], String::new());
+        assert_eq!(result.len(), 1);
+
+        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
+        assert!(std::path::Path::new(&rsp_path).is_absolute());
+        let content = std::fs::read_to_string(&rsp_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), args.len());
+        for (line, expected) in lines.iter().zip(args.iter()) {
+            assert_eq!(line, expected);
+        }
+
+        let _ = std::fs::remove_file(&rsp_path);
     }
 }
