@@ -701,8 +701,8 @@ pub fn print_usage() -> bool {
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_SKIP_SPLIT_FLAGS",
-        "Skip splitting fused flags.",
+        "WRAPPER_SPLIT_FLAGS",
+        "Split fused /Fd-dir /Fo-dir flags (off by default).",
         NAME_W,
         INNER,
     ));
