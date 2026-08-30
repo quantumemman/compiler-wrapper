@@ -43,12 +43,12 @@ pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gc
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
-pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
+pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
 pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap());
 
-pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
-pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
+pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/]INCREMENTAL:NO$"#).unwrap());
+pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/]INCREMENTAL:NO$"#).unwrap());
 pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[-/](Werror)"#).unwrap());
 
 pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[-/](Fd|Fo)"#).unwrap());
@@ -61,15 +61,16 @@ pub static LLVM_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::
         (Regex::new(r"^[-]D[/]bigobj$").expect(BAD_MATCH_MESSAGE), "".into()),
         (Regex::new(r"^[/]MD\(d\)?$").expect(BAD_MATCH_MESSAGE), "-fms-extensions".into()),
         (Regex::new(r"^[/]Zi$").expect(BAD_MATCH_MESSAGE), "-g".into()),
-        (Regex::new(r"^[/]01$").expect(BAD_MATCH_MESSAGE), "-01".into()),
-        (Regex::new(r"^[/]02$").expect(BAD_MATCH_MESSAGE), "-02".into()),
-        (Regex::new(r"^[/]03$").expect(BAD_MATCH_MESSAGE), "-03".into()),
-        (Regex::new(r"^[/]04$").expect(BAD_MATCH_MESSAGE), "-04".into()),
+        (Regex::new(r"^[/]O1$").expect(BAD_MATCH_MESSAGE), "-O1".into()),
+        (Regex::new(r"^[/]O2$").expect(BAD_MATCH_MESSAGE), "-O2".into()),
+        (Regex::new(r"^[/]O3$").expect(BAD_MATCH_MESSAGE), "-O3".into()),
+        (Regex::new(r"^[/]O4$").expect(BAD_MATCH_MESSAGE), "-O4".into()),
 ]});
 
 pub static LLVM_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
         (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
+        (Regex::new(r"^[/]?MANIFEST:(EMBED(,ID=\d+)?)$").expect(BAD_MATCH_MESSAGE), "/MANIFEST:NO".into()),
 ]});
 
 pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
@@ -80,6 +81,7 @@ pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::
 pub static MSVC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
     vec![
         (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
+        (Regex::new(r"^[/]?MANIFEST:(EMBED(,ID=\d+)?)$").expect(BAD_MATCH_MESSAGE), "/MANIFEST:NO".into()),
 ]});
 
 pub static GCC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
@@ -95,7 +97,7 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS-Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -Wno-unused-command-line-argument -Wno-author -Wno-error  -w";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-deprecated -Wno-author -Wno-unused-cli -Wno-ignored-attributes";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
 pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
@@ -135,12 +137,13 @@ pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String
     
     if WRAPPER_KEYWORDS.is_match(src_executable) {                                                   // matches a wrapper keyword such as sccache
         if COMPILER_KEYWORDS.is_match(src_executable) || LINKER_KEYWORDS.is_match(src_executable) {  // e.g. sccache-clang-cl
-            if src_executable.starts_with("sccache-") {
-                wrapper_name = "sccache".to_string();
-                executable_name = src_executable.replace("sccache-", "");
-            } else if src_executable.starts_with("ccache-") {
-                wrapper_name = "ccache".to_string();
-                executable_name = src_executable.replace("ccache-", "");
+            // The combined form is always "<wrapper>-<tool>", e.g. "sccache-clang-cl"
+            // or "ccache-g++". Split on the first '-' so the wrapper prefix is
+            // stripped generically — no need to know whether it is sccache,
+            // ccache, wrapper, or any other driver name.
+            if let Some((wrapper, tool)) = src_executable.split_once('-') {
+                wrapper_name = wrapper.to_string();
+                executable_name = tool.to_string();
             }
         } else {                                        // this is the case of pure sccache being called
                 wrapper_name = src_executable.clone();  // keep the wrapper executable as is
@@ -1224,6 +1227,62 @@ mod tests {
         String::new()
     }
 
+    // ---- Executable name resolution -------------------------------------
+
+    #[test]
+    fn wrapper_prefix_is_stripped_without_knowing_wrapper_name() {
+        // The outer gate recognises any wrapper name containing "ccache". The
+        // strip must not hardcode sccache/ccache: it takes whatever precedes the
+        // first '-' as the driver, so any such prefix yields the right pair.
+        let mut args = vec!["main.cpp".to_string()];
+        let (wrapper, tool) = get_executable_names(&"myccache-gcc".to_string(), &mut args);
+        assert_eq!(wrapper, "myccache");
+        assert_eq!(tool, "gcc");
+        assert_eq!(args, vec!["main.cpp"]); // combined wrappers do not consume args
+    }
+
+    #[test]
+    fn sccache_prefixed_names_split_into_driver_and_tool() {
+        for (full, expect_wrapper, expect_tool) in [
+            ("sccache-clang", "sccache", "clang"),
+            ("sccache-clang-cl", "sccache", "clang-cl"),
+            ("sccache-g++", "sccache", "g++"),
+            ("sccache-hipcc", "sccache", "hipcc"),
+        ] {
+            let mut args = Vec::new();
+            let (wrapper, tool) = get_executable_names(&full.to_string(), &mut args);
+            assert_eq!(wrapper, expect_wrapper, "wrapper for {full}");
+            assert_eq!(tool, expect_tool, "tool for {full}");
+        }
+    }
+
+    #[test]
+    fn ccache_prefixed_names_split_into_driver_and_tool() {
+        let mut args = Vec::new();
+        let (wrapper, tool) = get_executable_names(&"ccache-gcc".to_string(), &mut args);
+        assert_eq!(wrapper, "ccache");
+        assert_eq!(tool, "gcc");
+    }
+
+    #[test]
+    fn bare_wrapper_consumes_first_arg_as_tool() {
+        let mut args = vec!["gcc".to_string(), "-c".to_string(), "a.c".to_string()];
+        let (wrapper, tool) = get_executable_names(&"sccache".to_string(), &mut args);
+        assert_eq!(wrapper, "sccache");
+        assert_eq!(tool, "gcc");
+        assert_eq!(args, vec!["-c".to_string(), "a.c".to_string()]);
+    }
+
+    #[test]
+    fn non_wrapper_name_passes_through_unchanged() {
+        // Names without a wrapper keyword have no driver; the name is the tool.
+        let mut args = vec!["main.cpp".to_string()];
+        let (wrapper, tool) = get_executable_names(&"clang-cl".to_string(), &mut args);
+        assert_eq!(wrapper, "UNKNOWN");
+        assert_eq!(tool, "clang-cl");
+        assert_eq!(args, vec!["main.cpp"]);
+    }
+
     // ---- Split step -------------------------------------------------------
 
     #[test]
@@ -1742,6 +1801,59 @@ mod tests {
             get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::COMPILER));
         assert!(bad.is_match("/bigobj"));
         assert_eq!(extra, LLVM_COMPILER_EXTRA_FLAGS);
+    }
+
+    #[test]
+    fn llvm_linker_manifest_embed_is_replaced_not_dropped() {
+        // Regression: deleting `/MANIFEST:EMBED` as a "bad" flag orphaned the
+        // preceding `-Xlinker`/`-Wl,` gate, breaking the link command. It must
+        // now be swapped in place to `/MANIFEST:NO` so the pair stays intact.
+        let (bad, swaps, extra) =
+            get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
+        assert!(!bad.is_match("/MANIFEST:EMBED"), "manifest must be swapped, not dropped");
+        let result = apply_filter(
+            vec!["-Xlinker".to_string(), "/MANIFEST:EMBED".to_string()],
+            &default_cfg(),
+            &bad,
+            &swaps,
+            &extra.to_string(),
+        );
+        assert_eq!(
+            result,
+            vec!["-Xlinker".to_string(), "/MANIFEST:NO".to_string()]
+        );
+    }
+
+    #[test]
+    fn llvm_linker_manifest_variants_are_swapped_to_no() {
+        let (bad, swaps, extra) =
+            get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
+        for input in ["MANIFEST:EMBED", "/MANIFEST:EMBED", "/MANIFEST:EMBED,ID=2"] {
+            let result = apply_filter(
+                vec![input.to_string()],
+                &default_cfg(),
+                &bad,
+                &swaps,
+                &extra.to_string(),
+            );
+            assert_eq!(result, vec!["/MANIFEST:NO".to_string()], "for input {input}");
+        }
+    }
+
+    #[test]
+    fn llvm_linker_incremental_no_still_dropped() {
+        // `/INCREMENTAL:NO` is still removed as a bad flag; it is typically a
+        // self-standing linker arg, not the value of an -Xlinker gate.
+        let (bad, swaps, extra) =
+            get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
+        let result = apply_filter(
+            vec!["/INCREMENTAL:NO".to_string(), "main.obj".to_string()],
+            &default_cfg(),
+            &bad,
+            &swaps,
+            &extra.to_string(),
+        );
+        assert_eq!(result, vec!["main.obj".to_string()]);
     }
 
     #[test]

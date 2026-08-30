@@ -106,10 +106,13 @@ let status = Command::new(&runtime.main_exe)
 
 - The wrapper's own name (e.g. `clang-cl-rs`) is derived from its source file.
 - `get_executable_names` decides what to invoke. If the name contains a wrapper
-  keyword (`sccache` / `ccache`):
-  - `sccache-clang` style names split into `sccache` (the driver) + `clang` (the
-    deputy tool).
-  - a bare `sccache` / `ccache` wrapper consumes the *first argument* as the real
+  keyword (`ccache`, matched case-insensitively, so it catches `sccache`,
+  `ccache`, etc.):
+  - a combined `<wrapper>-<tool>` name (e.g. `sccache-clang-cl`, `ccache-g++`)
+    splits at the first `-`: the part before is the driver (`sccache`),
+    the part after is the deputy tool (`clang-cl`) — no hardcoded list of
+    wrapper names needed.
+  - a bare `ccache` / `sccache` wrapper consumes the *first argument* as the real
     tool, since pure drivers are neither compilers nor linkers.
 - `get_executable_paths` searches the baked-in `PATHS` (ordered by
   `WRAPPER_PREFER_VS`) for each name, appending `.exe` on Windows; absolute
@@ -166,10 +169,10 @@ executable from its name:
 Each (family, kind) pair maps to a filter pack:
 | Pack | Bad flags (excerpt) | Swaps (excerpt) | Extra flags |
 |------|---------------------|-----------------|-------------|
-| LLVM compiler | `/EHsc`, `permissive-`, `bigobj`, `EGR`, `W3`, several `-Wno-*` | `/MD{,d}`→`-fms-extensions`, `/Zi`→`-g`, `/O1`–`/O4`→`-O1`–`-O4` | `-D_USE_MATH_DEFINES`, warning suppressions, `-w` |
-| LLVM linker | `/INCREMENTAL:NO`, `/MANIFEST:EMBED,ID=2` | `/LTCG`→`-flto` | `/MANIFEST:NO` |
+| LLVM compiler | `/EHsc`, `permissive-`, `bigobj`, `EGR`, `W3`, several `-Wno-*` | `/MD{,d}`→`-fms-extensions`, `/Zi`→`-g`, `/O1`–`/O4`→`-O1`–`-O4` | `-D_USE_MATH_DEFINES`, `-D_CRT_SECURE_NO_WARNINGS`, `-w` |
+| LLVM linker | `/INCREMENTAL:NO` | `/LTCG`→`-flto`, `/MANIFEST:EMBED{,ID=2}`→`/MANIFEST:NO` | `/MANIFEST:NO` |
 | MSVC compiler | `bigobj`, `GR`, `Od`, `W3`, several `-Wno-*` | `/Zi`→`/Z7` | `-D_USE_MATH_DEFINES` `-D_CRT_SECURE_NO_WARNINGS` `-FS` `-w` |
-| MSVC linker | `/INCREMENTAL:NO`, `/MANIFEST:EMBED,ID=2` | `/LTCG`→`-flto` | *(none)* |
+| MSVC linker | `/INCREMENTAL:NO` | `/LTCG`→`-flto`, `/MANIFEST:EMBED{,ID=2}`→`/MANIFEST:NO` | *(none)* |
 | GCC compiler | `/Werror`, `ffast-math`, `fstrict-aliasing`, `fpack-struct`, `fshort-enum` | `/Zi`→`-g` | `-w` |
 | GCC linker | `/Werror` | `/LTCG`→`-flto` | *(none)* |
 
