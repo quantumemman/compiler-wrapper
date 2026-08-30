@@ -516,7 +516,8 @@ impl FilterConfig {
     pub fn from_env() -> Self {
         let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
-            skip_split: skip_all || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
+            // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FLAGS opts it back in.
+            skip_split: skip_all || !env::var("WRAPPER_SPLIT_FLAGS").is_ok(),
             skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
             skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
             skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
@@ -1066,8 +1067,8 @@ pub fn print_usage() -> bool {
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_SKIP_SPLIT_FLAGS",
-        "Skip splitting fused flags.",
+        "WRAPPER_SPLIT_FLAGS",
+        "Split fused /Fd-dir /Fo-dir flags (off by default).",
         NAME_W,
         INNER,
     ));
