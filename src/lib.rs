@@ -43,7 +43,7 @@ pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gc
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
 pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
 pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap());
 
@@ -51,7 +51,7 @@ pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(
 pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
 pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[-/](Werror)"#).unwrap());
 
-pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](Fd|Fo)"#).unwrap());
+pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[-/](Fd|Fo)"#).unwrap());
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                             Swap Problematic Arguments                              //
@@ -95,9 +95,9 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-error -Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -w";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS-Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -Wno-unused-command-line-argument -Wno-author -Wno-error  -w";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
-pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-errror=implicit-function-declaration -Wno-errror=extern-initializer -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=logical-op-parentheses /wd4838 -w -FS";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
 pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
 pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
@@ -262,11 +262,13 @@ fn apply_filter(input_args: Vec<String>, config: &FilterConfig, bad_flags: &Rege
     if !config.skip_split {
         for arg in input_args {
             if let Some(cap) = COMMON_SPLIT_FLAGS.captures(&arg) {
-                let full = cap.get(0).unwrap().as_str();
-                if full.len() < arg.len() {                       // fused flag + directory
-                    expanded_args.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
-                    expanded_args.push(arg[full.len()..].to_string()); // directory part
-                } else {                                          // exactly /Fd or /Fo
+                // The matched text is the whole fused flag, e.g. "/Fo" or "-Fd". It is
+                // exactly the split-out flag (prefix preserved), so reuse it directly.
+                let flag = cap.get(0).unwrap().as_str();
+                if flag.len() < arg.len() {                          // fused flag + directory
+                    expanded_args.push(flag.to_string());
+                    expanded_args.push(arg[flag.len()..].to_string()); // directory part
+                } else {                                             // bare flag, no value
                     expanded_args.push(arg);
                 }
             } else {
@@ -297,11 +299,10 @@ fn apply_filter(input_args: Vec<String>, config: &FilterConfig, bad_flags: &Rege
 
     if final_args.is_empty() && !config.skip_version_on_empty {
         final_args.push("--version".into());
-    } else if !config.skip_add && final_args.len() > 1 && !extra_flags.is_empty() && final_args.iter().any(|a| a == "-x") {
-        let index = final_args.iter().position(|a| a == "-x").unwrap();
-        if final_args[index + 2] != extra_flags.split(" ").next().unwrap() {  // Avoid inserting extra flags twice
-            final_args.splice(index + 2..index + 2, extra_flags.split(" ").map(|s| s.into()));
-        }
+    } else if !config.skip_add && !extra_flags.is_empty() {
+        // Splice in the extra helpful flags at a position that cannot corrupt the
+        // compile/link command — see `insert_extra_flags` for the placement rules.
+        insert_extra_flags(&mut final_args, &split_flags(extra_flags));
     }
 
     if final_args.iter().any(|a| a.starts_with('@')) {
@@ -319,6 +320,102 @@ fn apply_filter(input_args: Vec<String>, config: &FilterConfig, bad_flags: &Rege
         final_args = vec![format!("@{}", rsp_path.display())];
     }
     return final_args;
+}
+
+// Tokenize an `extra_flags` string on ASCII whitespace. Using split_whitespace
+// (not split(" ")) avoids leaking empty tokens on leading/trailing/doubled spaces.
+fn split_flags(extra_flags: &str) -> Vec<String> {
+    extra_flags.split_whitespace().map(|s| s.to_string()).collect()
+}
+
+// Extensions that mark an argument as a compilation input. Used to tell a compile
+// step apart from a pure link step so compiler-only flags (warning suppressions,
+// `-D` defines) are never spliced into a linker invocation.
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "c", "cc", "cpp", "cxx", "c++", "m", "mm", "cu", "cuh", "s", "asm",
+];
+
+// True when `a` names a source file (e.g. "main.cpp", "/x/foo.c"). Flags and
+// response-file arguments are never source files.
+fn is_source_arg(a: &str) -> bool {
+    if a.starts_with('-') || a.starts_with('/') || a.starts_with('@') {
+        return false;
+    }
+    Path::new(a)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext.as_str()))
+}
+
+// Heuristic: is this a compile step rather than a link step? True when `-x`/`-c`/
+// `-S`/`-E` appear, or a non-flag argument names a source file. Object/library/
+// response-file inputs alone imply a link.
+fn is_compile_step(args: &[String]) -> bool {
+    if args.iter().any(|a| matches!(a.as_str(), "-x" | "-c" | "-S" | "-E")) {
+        return true;
+    }
+    args.iter().any(|a| is_source_arg(a))
+}
+
+// Insert `extra` tokens at `at`, preserving the relative order of every other
+// argument so no flag/value pair is ever split.
+fn splice_at(args: &mut Vec<String>, at: usize, extra: &[String]) {
+    let tail = args.split_off(at);
+    args.extend(extra.iter().cloned());
+    args.extend(tail);
+}
+
+// Safely splice the extra helpful flags into `args` so the resulting compile/link
+// command stays valid. The flags are compiler options, so they are always placed in
+// the *options* region of the command — never appended after a `--` / the source
+// file, where clang-cl treats trailing tokens as linker/input arguments.
+//
+// Placement rules, in priority order:
+//   * `-x <lang>` anchor: flags land right after the language token. Bounds-checked
+//     so a bare/trailing `-x` can no longer panic (the old code indexed i+2 blindly).
+//   * `--` separator: everything after `--` is positional, so flags are inserted just
+//     before it (this is the CMake/clang-cl shape: `... /Fo<o> /Fd<d> -c -- src.c`).
+//   * otherwise, before the first source file — the natural end of the options list;
+//     stopping only at a source token guarantees a preceding `-o <out>` / `-Fo...`
+//     flag+value pair is never split.
+//   * fallback: only append at the end for a clear compile step; a pure link (objects
+//     + `-o`) is left untouched so compiler-only flags never leak into a link.
+//   * Duplicate sets and empty/passthrough lists are ignored.
+fn insert_extra_flags(args: &mut Vec<String>, extra: &[String]) {
+    if args.is_empty() || extra.is_empty() {
+        return;
+    }
+    // If any token is already present, assume the whole set was added before.
+    if extra.iter().any(|f| args.contains(f)) {
+        return;
+    }
+
+    if let Some(x_pos) = args.iter().position(|a| a == "-x") {
+        let mut at = x_pos + 1;
+        if at < args.len() {
+            at += 1; // skip the language token, land before the inputs
+        }
+        splice_at(args, at, extra);
+        return;
+    }
+
+    // `--` ends option parsing: everything after it is positional (input/link) args.
+    if let Some(sep) = args.iter().position(|a| a == "--") {
+        splice_at(args, sep, extra);
+        return;
+    }
+
+    // No `--`: stop at the start of the source list, keeping options together ahead.
+    if let Some(src) = args.iter().position(|a| is_source_arg(a)) {
+        splice_at(args, src, extra);
+        return;
+    }
+
+    // No `-x`/`--`/source: only add flags to a clear compile step; leave links alone.
+    if is_compile_step(args) {
+        splice_at(args, args.len(), extra);
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -1095,19 +1192,39 @@ pub fn print_usage() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use regex::Regex;
 
     use std::sync::Mutex;
 
     // Serializes response-file tests: the response file name embeds the process
     // id (same for every test thread), so parallel tests would clobber each
-    // other's files. Holding this mutex ensures create→read→delete is atomic.
+    // other's files. Holding this mutex keeps create→read→delete atomic.
     static RSP_MUTEX: Mutex<()> = Mutex::new(());
 
+    // A regex that matches nothing, so no argument is ever dropped or swapped by it.
     fn never_match() -> Regex {
-        regex::Regex::new(r"\P{any}").unwrap() // matches no character; never matches anything
+        Regex::new(r"\P{any}").unwrap()
     }
 
-    // Split fused flag+directory: /Fd<path> and /Fo<path> become two args.
+    // Config like the production defaults but with a huge char limit so arguments
+    // never spill into a response file unless explicitly tested.
+    fn default_cfg() -> FilterConfig {
+        FilterConfig {
+            args_char_limit: 1_000_000,
+            ..FilterConfig::default()
+        }
+    }
+
+    fn no_swaps() -> Vec<(Regex, String)> {
+        vec![]
+    }
+
+    fn no_extra() -> String {
+        String::new()
+    }
+
+    // ---- Split step -------------------------------------------------------
+
     #[test]
     fn splits_fused_flag_and_directory() {
         let input_args = vec![
@@ -1115,7 +1232,7 @@ mod tests {
             "/Foanother\\target\\directory".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filterArgs(input_args, never_match(), vec![], String::new());
+        let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
         assert_eq!(
             result,
             vec![
@@ -1128,7 +1245,6 @@ mod tests {
         );
     }
 
-    // Standalone flags pass through unchanged.
     #[test]
     fn passes_through_standalone_flags() {
         let input_args = vec![
@@ -1136,7 +1252,7 @@ mod tests {
             "/Fo".to_string(),
             "main.cpp".to_string(),
         ];
-        let result = filterArgs(input_args, never_match(), vec![], String::new());
+        let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
         assert_eq!(
             result,
             vec![
@@ -1147,18 +1263,20 @@ mod tests {
         );
     }
 
-    // Case-insensitive flag prefix still splits; case-mismatch standalone passes through.
     #[test]
     fn splits_case_insensitive_prefix() {
-        let fused = vec!["/Fodist\\lib.obj".to_string()];
         assert_eq!(
-            filterArgs(fused, never_match(), vec![], String::new()),
+            apply_filter(
+                vec!["/Fodist\\lib.obj".to_string()],
+                &default_cfg(),
+                &never_match(),
+                &no_swaps(),
+                &no_extra(),
+            ),
             vec!["/Fo".to_string(), "dist\\lib.obj".to_string()]
         );
     }
 
-    // Mixed real-world input: -clang: prefixed input_args pass through unchanged (they start with
-    // '-', not '/'), only the leading /Fd fused flag+path splits.
     #[test]
     fn passes_clang_prefixed_and_splits_fd() {
         let input_args = vec![
@@ -1166,7 +1284,7 @@ mod tests {
             "-clang:/FoCMakeLists\\my\\sussy.dir\\".to_string(),
             "/Fdsome\\suspicious\\dirname".to_string(),
         ];
-        let result = filterArgs(input_args, never_match(), vec![], String::new());
+        let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
         assert_eq!(
             result,
             vec![
@@ -1178,171 +1296,390 @@ mod tests {
         );
     }
 
-    // Helper: a config that mimics the default (no skips) but with a large char limit so
-    // input_args never spill into a response file unless explicitly tested.
-    fn default_cfg() -> FilterConfig {
-        FilterConfig {
-            args_char_limit: 1_000_000,
-            ..FilterConfig::default()
-        }
+    // The split step now accepts both "/" and "-" prefixes for the fused
+    // Fd/Fo flags, preserving whichever prefix was used.
+    #[test]
+    fn splits_dash_prefixed_fo_flag() {
+        let result = apply_filter(
+            vec!["-Fodist\\lib.obj".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
+        assert_eq!(
+            result,
+            vec!["-Fo".to_string(), "dist\\lib.obj".to_string()]
+        );
     }
 
-    // skip_split leaves fused /Fd<dir> untouched instead of splitting into two args.
+    #[test]
+    fn splits_dash_prefixed_fd_flag() {
+        let result = apply_filter(
+            vec!["-Fdsome\\suspicious\\dirname".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
+        assert_eq!(
+            result,
+            vec!["-Fd".to_string(), "some\\suspicious\\dirname".to_string()]
+        );
+    }
+
+    #[test]
+    fn splits_mixed_slash_and_dash_flags() {
+        let result = apply_filter(
+            vec![
+                "/Foout\\dir\\a.obj".to_string(),
+                "-Fdbuild\\pdb".to_string(),
+            ],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
+        assert_eq!(
+            result,
+            vec![
+                "/Fo".to_string(),
+                "out\\dir\\a.obj".to_string(),
+                "-Fd".to_string(),
+                "build\\pdb".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_dash_fo_passes_through() {
+        // A bare flag (no fused value) is left as-is; the following token is its value.
+        let result = apply_filter(
+            vec!["-Fo".to_string(), "main.cpp".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
+        assert_eq!(result, vec!["-Fo".to_string(), "main.cpp".to_string()]);
+    }
+
     #[test]
     fn skip_split_keeps_fused_flag_together() {
-        let input_args = vec!["/Fdsome\\target\\directory".to_string()];
         let mut cfg = default_cfg();
         cfg.skip_split = true;
-        let result = applyFilter(input_args, &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(
+            vec!["/Fdsome\\target\\directory".to_string()],
+            &cfg,
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
         assert_eq!(result, vec!["/Fdsome\\target\\directory".to_string()]);
     }
 
-    // Without skip_split, the fused flag still splits (sanity guard against regressions).
+// ---- Remove-bad step --------------------------------------------------
+
     #[test]
-    fn default_splits_fused_flag() {
-        let input_args = vec!["/Fdsome\\target\\directory".to_string()];
-        let result = applyFilter(input_args, &default_cfg(), never_match(), vec![], String::new());
-        assert_eq!(
-            result,
-            vec!["/Fd".to_string(), "some\\target\\directory".to_string()]
+    fn removes_bad_flags() {
+        let bad = Regex::new(r"^/bigobj$").unwrap();
+        let result = apply_filter(
+            vec!["/bigobj".to_string(), "main.cpp".to_string()],
+            &default_cfg(),
+            &bad,
+            &no_swaps(),
+            &no_extra(),
         );
+        assert_eq!(result, vec!["main.cpp".to_string()]);
     }
 
-    // skip_bad keeps a flagged arg that would otherwise be dropped.
     #[test]
     fn skip_bad_keeps_flags_that_would_be_removed() {
-        let input_args = vec!["/bigobj".to_string(), "main.cpp".to_string()];
-        let bad = regex::Regex::new(r"^/bigobj$").unwrap();
-
+        let bad = Regex::new(r"^/bigobj$").unwrap();
         let mut cfg = default_cfg();
         cfg.skip_bad = true;
-        assert_eq!(
-            apply_filter(input_args.clone(), &cfg, bad.clone(), vec![], String::new()),
-            vec!["/bigobj".to_string(), "main.cpp".to_string()]
+        let result = apply_filter(
+            vec!["/bigobj".to_string(), "main.cpp".to_string()],
+            &cfg,
+            &bad,
+            &no_swaps(),
+            &no_extra(),
         );
-
-        assert_eq!(
-            apply_filter(input_args.clone(), &default_cfg(), bad, vec![], String::new()),
-            vec!["main.cpp".to_string()]
-        );
+        assert_eq!(result, vec!["/bigobj".to_string(), "main.cpp".to_string()]);
     }
 
-    // skip_swap keeps the original arg instead of replacing it.
+    // ---- Swap step --------------------------------------------------------
+
+    #[test]
+    fn swaps_matching_flags() {
+        let swaps = vec![(Regex::new(r"^/Zi$").unwrap(), "-g".to_string())];
+        let result = apply_filter(
+            vec!["/Zi".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &swaps,
+            &no_extra(),
+        );
+        assert_eq!(result, vec!["-g".to_string()]);
+    }
+
     #[test]
     fn skip_swap_keeps_original_arg() {
-        let input_args = vec!["/Zi".to_string()];
-        let swaps = vec![(regex::Regex::new(r"^/Zi$").unwrap(), "-g".to_string())];
-
+        let swaps = vec![(Regex::new(r"^/Zi$").unwrap(), "-g".to_string())];
         let mut cfg = default_cfg();
         cfg.skip_swap = true;
-        assert_eq!(
-            apply_filter(input_args.clone(), &cfg, never_match(), swaps.clone(), String::new()),
-            vec!["/Zi".to_string()]
+        let result = apply_filter(
+            vec!["/Zi".to_string()],
+            &cfg,
+            &never_match(),
+            &swaps,
+            &no_extra(),
         );
-
-        assert_eq!(
-            apply_filter(input_args.clone(), &default_cfg(), never_match(), swaps, String::new()),
-            vec!["-g".to_string()]
-        );
+        assert_eq!(result, vec!["/Zi".to_string()]);
     }
 
-    // skip_add prevents the extra helpful flags from being spliced in after -x.
+    // ---- Add step (extra flags) -------------------------------------------
+
     #[test]
-    fn skip_add_prevents_extra_flags() {
-        let input_args = vec!["-x".to_string(), "a.c".to_string(), "b".to_string()];
+    fn inserts_extra_flags_after_x_language() {
         let extra = "FLAG1 FLAG2".to_string();
-
-        let mut cfg = default_cfg();
-        cfg.skip_add = true;
-        assert_eq!(
-            apply_filter(input_args.clone(), &cfg, never_match(), vec![], extra.clone()),
-            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]
+        let result = apply_filter(
+            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
         );
-
-        // Without skip_add the extra flags are spliced in.
         assert_eq!(
-            apply_filter(input_args, &default_cfg(), never_match(), vec![], extra),
+            result,
             vec![
                 "-x".to_string(),
                 "a.c".to_string(),
                 "FLAG1".to_string(),
                 "FLAG2".to_string(),
-                "b".to_string()
+                "b".to_string(),
             ]
         );
     }
 
-    // With no arguments the wrapper auto-appends --version so the tool still prints
-    // something useful; WRAPPER_SKIP_VERSION_ON_EMPTY leaves the input_args list empty.
     #[test]
-    fn skip_version_on_empty_prevents_auto_version() {
-        let empty: Vec<String> = vec![];
-
-        // Default behaviour: empty input_args become a lone --version.
-        assert_eq!(
-            apply_filter(empty.clone(), &default_cfg(), never_match(), vec![], String::new()),
-            vec!["--version".to_string()]
-        );
-
-        // With the skip set, nothing is appended.
+    fn skip_add_prevents_extra_flags() {
+        let extra = "FLAG1 FLAG2".to_string();
         let mut cfg = default_cfg();
-        cfg.skip_version_on_empty = true;
+        cfg.skip_add = true;
+        let result = apply_filter(
+            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()],
+            &cfg,
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
         assert_eq!(
-            apply_filter(empty, &cfg, never_match(), vec![], String::new()),
-            Vec::<String>::new()
+            result,
+            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]
         );
     }
 
-    // skip-all short-circuits: every hop disabled.
+    #[test]
+    fn inserts_extra_flags_before_source_without_x() {
+        // No `-x`/`--`: flags go at the start of the source list (options region),
+        // so they stay compiler options instead of trailing the source file.
+        let extra = "FLAG1 FLAG2".to_string();
+        let result = apply_filter(
+            vec!["-O2".to_string(), "main.cpp".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        assert_eq!(
+            result,
+            vec![
+                "-O2".to_string(),
+                "FLAG1".to_string(),
+                "FLAG2".to_string(),
+                "main.cpp".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn inserts_extra_flags_before_double_dash() {
+        // Match the exact CMake/clang-cl shape: `... /Fo<o> /Fd<d> -c -- src.c`.
+        // Flags must land BEFORE `--` so clang-cl parses them as options, not as
+        // trailing linker/input arguments after the source.
+        let extra = "-D_USE_MATH_DEFINES -w".to_string();
+        let result = apply_filter(
+            vec![
+                "/FoCMakeFiles\\t.dir\\t.c.obj".to_string(),
+                "/FdCMakeFiles\\t.dir\\".to_string(),
+                "-c".to_string(),
+                "--".to_string(),
+                "C:\\proj\\t.c".to_string(),
+            ],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        assert_eq!(
+            result,
+            vec![
+                "/Fo".to_string(),
+                "CMakeFiles\\t.dir\\t.c.obj".to_string(),
+                "/Fd".to_string(),
+                "CMakeFiles\\t.dir\\".to_string(),
+                "-c".to_string(),
+                "-D_USE_MATH_DEFINES".to_string(),
+                "-w".to_string(),
+                "--".to_string(),
+                "C:\\proj\\t.c".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_insert_extra_flags_for_link_step() {
+        // A pure link (objects + -o) must never receive compiler-only flags.
+        let extra = "FLAG1".to_string();
+        let result = apply_filter(
+            vec!["main.obj".to_string(), "-o".to_string(), "app.exe".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        assert_eq!(
+            result,
+            vec!["main.obj".to_string(), "-o".to_string(), "app.exe".to_string()]
+        );
+    }
+
+    #[test]
+    fn does_not_duplicate_extra_flags() {
+        let extra = "FLAG1 FLAG2".to_string();
+        let result = apply_filter(
+            vec!["-x".to_string(), "a.c".to_string(), "FLAG1".to_string(), "b".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        assert_eq!(
+            result,
+            vec![
+                "-x".to_string(),
+                "a.c".to_string(),
+                "FLAG1".to_string(),
+                "b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_x_does_not_panic_and_runs() {
+        // `-x` with nothing after it must not trigger an out-of-bounds index.
+        let extra = "FLAG1".to_string();
+        let result = apply_filter(
+            vec!["-x".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        assert_eq!(result, vec!["-x".to_string(), "FLAG1".to_string()]);
+    }
+
+    #[test]
+    fn empty_extra_flags_do_nothing() {
+        let result = apply_filter(
+            vec!["-x".to_string(), "a.c".to_string(), "b".to_string()],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
+        assert_eq!(result, vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]);
+    }
+
+// ---- skip-all ----------------------------------------------------------
+
     #[test]
     fn skip_all_flags_disables_every_step() {
         let input_args = vec!["/Fdsome\\dir".to_string(), "/bigobj".to_string()];
-        let bad = regex::Regex::new(r"^/bigobj$").unwrap();
+        let bad = Regex::new(r"^/bigobj$").unwrap();
+        let extra = "FLAG".to_string();
         let mut cfg = default_cfg();
         cfg.skip_split = true;
         cfg.skip_bad = true;
         cfg.skip_swap = true;
         cfg.skip_add = true;
-        let result = apply_filter(input_args.clone(), &cfg, bad, vec![], "FLAG".to_string());
+        let result = apply_filter(input_args.clone(), &cfg, &bad, &no_swaps(), &extra);
         assert_eq!(result, input_args);
     }
 
-    // force_response_files collapses the final input_args into a single @file.rsp arg.
+    // ---- Version fallback -------------------------------------------------
+
+    #[test]
+    fn empty_args_append_version() {
+        assert_eq!(
+            apply_filter(vec![], &default_cfg(), &never_match(), &no_swaps(), &no_extra()),
+            vec!["--version".to_string()]
+        );
+    }
+
+    #[test]
+    fn skip_version_on_empty_prevents_auto_version() {
+        let mut cfg = default_cfg();
+        cfg.skip_version_on_empty = true;
+        assert_eq!(
+            apply_filter(vec![], &cfg, &never_match(), &no_swaps(), &no_extra()),
+            Vec::<String>::new()
+        );
+    }
+
+    // ---- Response files ---------------------------------------------------
+
     #[test]
     fn force_response_files_uses_response_file() {
         let _guard = RSP_MUTEX.lock().unwrap();
-        let args = vec!["main.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(
+            vec!["main.cpp".to_string()],
+            &cfg,
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
-        // Response file must be an absolute path in the temp directory
-        let path = std::path::Path::new(&rsp);
-        assert!(path.is_absolute(), "response file path should be absolute, got: {}", rsp);
-        assert!(rsp.contains("linker_reponse_"), "response file name should contain prefix, got: {}", rsp);
+        assert!(std::path::Path::new(&rsp).is_absolute());
+        let prefix = RESPONSE_FILE_NAME.strip_suffix(".rsp").unwrap();
+        assert!(rsp.contains(prefix), "expected a {RESPONSE_FILE_NAME}-based name, got: {rsp}");
         let _ = std::fs::remove_file(&rsp);
     }
 
-    // When args exceed args_char_limit the wrapper emits a response file.
     #[test]
     fn args_over_char_limit_become_response_file() {
         let _guard = RSP_MUTEX.lock().unwrap();
-        let args = vec!["main.cpp".to_string(), "with-a-very-long-name.cpp".to_string()];
         let mut cfg = default_cfg();
-        cfg.args_char_limit = 10; // shorter than the joined args
-        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
+        cfg.args_char_limit = 10;
+        let result = apply_filter(
+            vec!["main.cpp".to_string(), "with-a-very-long-name.cpp".to_string()],
+            &cfg,
+            &never_match(),
+            &no_swaps(),
+            &no_extra(),
+        );
         assert_eq!(result.len(), 1);
         let rsp = result[0].strip_prefix('@').unwrap().to_string();
         assert!(rsp.ends_with(".rsp"));
-        let path = std::path::Path::new(&rsp);
-        assert!(path.is_absolute(), "response file path should be absolute, got: {}", rsp);
+        assert!(std::path::Path::new(&rsp).is_absolute());
         let _ = std::fs::remove_file(&rsp);
     }
 
-    // Verifies the response file round-trip: args written to the .rsp file are
-    // exactly the input args, one per line, in order.
     #[test]
     fn response_file_content_matches_args() {
         let _guard = RSP_MUTEX.lock().unwrap();
@@ -1355,25 +1692,16 @@ mod tests {
         ];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args.clone(), &cfg, &never_match(), &no_swaps(), &no_extra());
         assert_eq!(result.len(), 1);
-
         let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
-        assert!(rsp_path.ends_with(".rsp"));
         assert!(std::path::Path::new(&rsp_path).is_absolute());
-
-        // Read the response file back and verify each line matches the original args
         let content = std::fs::read_to_string(&rsp_path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), args.len());
-        for (line, expected) in lines.iter().zip(args.iter()) {
-            assert_eq!(line, expected);
-        }
-
+        assert_eq!(lines, args.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         let _ = std::fs::remove_file(&rsp_path);
     }
 
-    // Verifies that args with special characters (spaces, dashes, paths) survive the round-trip.
     #[test]
     fn response_file_handles_special_arg_characters() {
         let _guard = RSP_MUTEX.lock().unwrap();
@@ -1386,92 +1714,40 @@ mod tests {
         ];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
+        let result = apply_filter(args.clone(), &cfg, &never_match(), &no_swaps(), &no_extra());
         assert_eq!(result.len(), 1);
-
         let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
-        assert!(std::path::Path::new(&rsp_path).is_absolute());
         let content = std::fs::read_to_string(&rsp_path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), args.len());
-        for (line, expected) in lines.iter().zip(args.iter()) {
-            assert_eq!(line, expected);
-        }
-
+        assert_eq!(lines, args.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         let _ = std::fs::remove_file(&rsp_path);
     }
 
-    // When the first arg is a tool name (e.g. "sccache", "clang"), it should be
-    // extracted as a prefix and NOT appear in the response file.
     #[test]
-    fn leading_tool_arg_extracted_as_prefix() {
+    fn preserves_existing_response_file_arg() {
         let _guard = RSP_MUTEX.lock().unwrap();
-        let args = vec![
-            "sccache".to_string(),
-            "-O2".to_string(),
-            "main.cpp".to_string(),
-        ];
+        let args = vec!["@explicit.rsp".to_string(), "main.cpp".to_string()];
         let mut cfg = default_cfg();
         cfg.force_response_files = true;
-        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
-        assert_eq!(result.len(), 1);
-
-        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
-        let content = std::fs::read_to_string(&rsp_path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // "sccache" must NOT be in the response file
-        assert!(!lines.contains(&"sccache"), "response file should not contain the tool name");
-        // Only the remaining args should be present
-        assert_eq!(lines, vec!["-O2", "main.cpp"]);
-
-        let _ = std::fs::remove_file(&rsp_path);
+        let result = apply_filter(args.clone(), &cfg, &never_match(), &no_swaps(), &no_extra());
+        assert_eq!(result, args);
     }
 
-    // When the first arg is NOT a tool name, no prefix is extracted.
+    // ---- Classification ---------------------------------------------------
+
     #[test]
-    fn non_tool_arg_not_extracted() {
-        let _guard = RSP_MUTEX.lock().unwrap();
-        let args = vec![
-            "-O2".to_string(),
-            "main.cpp".to_string(),
-        ];
-        let mut cfg = default_cfg();
-        cfg.force_response_files = true;
-        let result = apply_filter(args.clone(), &cfg, never_match(), vec![], String::new());
-        assert_eq!(result.len(), 1);
-
-        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
-        let content = std::fs::read_to_string(&rsp_path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-
-        // All args should be present (no prefix extracted)
-        assert_eq!(lines, vec!["-O2", "main.cpp"]);
-
-        let _ = std::fs::remove_file(&rsp_path);
+    fn llvm_compiler_pack_has_compile_extra_flags() {
+        let (bad, _swaps, extra) =
+            get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::COMPILER));
+        assert!(bad.is_match("/bigobj"));
+        assert_eq!(extra, LLVM_COMPILER_EXTRA_FLAGS);
     }
 
-    // Tool name with .exe extension is also recognized and extracted.
     #[test]
-    fn leading_tool_arg_with_exe_extracted() {
-        let _guard = RSP_MUTEX.lock().unwrap();
-        let args = vec![
-            "clang.exe".to_string(),
-            "-c".to_string(),
-            "test.cpp".to_string(),
-        ];
-        let mut cfg = default_cfg();
-        cfg.force_response_files = true;
-        let result = apply_filter(args, &cfg, never_match(), vec![], String::new());
-        assert_eq!(result.len(), 1);
-
-        let rsp_path = result[0].strip_prefix('@').unwrap().to_string();
-        let content = std::fs::read_to_string(&rsp_path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-
-        assert!(!lines.contains(&"clang.exe"), "response file should not contain the tool name");
-        assert_eq!(lines, vec!["-c", "test.cpp"]);
-
-        let _ = std::fs::remove_file(&rsp_path);
+    fn llvm_linker_pack_has_linker_extra_flags() {
+        let (_bad, _swaps, extra) =
+            get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
+        assert_eq!(extra, LLVM_LINKER_EXTRA_FLAGS);
+        assert!(!extra.contains("-w"), "linker extra flags must not be compiler-only");
     }
 }
