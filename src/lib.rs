@@ -15,15 +15,15 @@ pub const MSVC_PATH: &str = env!("MSVC_PATH_");           // Microsoft Visual C+
 pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");     // Visual Studio LLVM toolchain path
 pub const LLVM_PATH: &str = env!("LLVM_PATH_");           // Custom LLVM toolchain path
 pub const GCC_PATH: &str = env!("GCC_PATH_");             // GNU Compiler Collection path
-pub const PY_SCRIPTS_PATH: &str = env!("PY_PATH_");       // Python venv Scripts path
+pub const WRAPPER_PATH: &str = env!("PY_PATH_");       // Python venv Scripts path
 pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
     // If WRAPPER_PREFER_VS is defined, prefer Visual Studio's LLVM toolchain; otherwise prefer Custom LLVM.
     if env::var("WRAPPER_PREFER_VS").is_ok() {
         info!("Preferring Visual Studio LLVM toolchain");
-        [&LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer VS LLVM
+        [&LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &WRAPPER_PATH] // Prefer VS LLVM
     } else {
         info!("Preferring Custom LLVM toolchain");
-        [&LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer Custom LLVM
+        [&LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &WRAPPER_PATH] // Prefer Custom LLVM
     }
 });
 
@@ -701,8 +701,8 @@ pub fn print_usage() -> bool {
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_SKIP_SPLIT_FLAGS",
-        "Skip splitting fused flags.",
+        "WRAPPER_SPLIT_FLAGS",
+        "Split fused /Fd-dir /Fo-dir flags (off by default).",
         NAME_W,
         INNER,
     ));
