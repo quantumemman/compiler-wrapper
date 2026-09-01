@@ -4,7 +4,7 @@ use std::process::{Command, ExitCode};
 use wrapper::{Runtime, print_usage};
 
 fn main() -> ExitCode {
-    let _ = env_logger::try_init(); // Use try_init() to initialize the logger so the program doesn't crash if it's already initialized.
+    let _ = wrapper::init_logger(); // Initialize the dual logger (stdout + optional file)
     if print_usage() {
         return ExitCode::SUCCESS;   // Print usage if WRAPPER_OPTIONS or WRAPPER_HELP env var is set and exit
     }
