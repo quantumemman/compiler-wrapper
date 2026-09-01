@@ -114,8 +114,8 @@ pub const RESPONSE_FILE_NAME: &str = "response_file.rsp";
 /////////////////////////////////////////////////////////////////////////////////////////
 #[derive(Debug)]
 pub enum ExecutableFamily {
-    LLVM,        // clang, clang++, lld-link
-    MSVC,        // cl, clang-cl, link
+    LLVM,        // clang, clang++, clang-cl, lld-link
+    MSVC,        // cl, link, can put clang-cl here via env vars
     GCC,         // gcc, g++, ld
     UNKNOWN,     // default classification, sccache, ccache
 }
@@ -210,7 +210,8 @@ pub fn get_target_classification(executable_name: &String) -> (ExecutableFamily,
     let mut executable_family = ExecutableFamily::UNKNOWN;
     let mut executable_kind = ExecutableKind::UNKNOWN;
     
-    if executable_name.contains("clang-cl") {               // clang-cl should be treated as MSVC but would trigger LLVM so check it first
+    // treat clang-cl as MSVC only when explicitly requested AND LLVM is not requested
+    if (env::var("WRAPPER_CLANG_CL_IS_MSVC").is_ok() && !env::var("WRAPPER_CLANG_CL_IS_LLVM").is_ok()) && executable_name.contains("clang-cl") {
         executable_family = ExecutableFamily::MSVC;
     } else if LLVM_KEYWORDS.is_match(executable_name) {     // LLVM family
         executable_family = ExecutableFamily::LLVM;
@@ -1048,6 +1049,18 @@ pub fn print_usage() -> bool {
     lines.extend(usage_pair(
         "WRAPPER_PREFER_VS",
         "Prefer VS Studio LLVM executables over ROCm LLVM.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_CLANG_CL_IS_LLVM",
+        "Route clang-cl down the LLVM family (the default). Declaring it explicitly makes the intent immune to default changes.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_CLANG_CL_IS_MSVC",
+        "Force clang-cl to use the MSVC family instead of the default LLVM family.",
         NAME_W,
         INNER,
     ));

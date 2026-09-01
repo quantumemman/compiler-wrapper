@@ -195,6 +195,8 @@ set RUST_LOG=trace      # + argument/name/expect internals, candidate search
 | Variable | Effect |
 |----------|--------|
 | `WRAPPER_PREFER_VS` | Prefer Visual Studio's LLVM executables over ROCm LLVM when locating tools. |
+| `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family (the default). Declaring it explicitly makes the intent immune to default changes. |
+| `WRAPPER_CLANG_CL_IS_MSVC` | Force `clang-cl` to use the MSVC family instead of the default LLVM family. |
 | `WRAPPER_SPLIT_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
 | `WRAPPER_SKIP_BAD_FLAGS` | Skip removing known-bad flags. |
 | `WRAPPER_SKIP_SWAP_FLAGS` | Skip swapping problematic flags. |
