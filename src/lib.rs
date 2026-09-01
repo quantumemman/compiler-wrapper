@@ -6,7 +6,10 @@ use std::process::{id};                   // for process id
 use std::string::String;                  // for String type
 use std::sync::LazyLock;                  // for LazyLock init
 use regex::Regex;                         // for Regex operations
-use log::{trace, debug, info, warn, error};  // logging macros with levels: trace, debug, info, warn, error
+use log::{trace, debug, info, warn, error}; // log levels for RUST_LOG from most verbose to least verbose
+use log::{Level, LevelFilter, Metadata, Record, Log}; // log traits to be used to implement custom dual logger
+use std::sync::Mutex;                     // to synchronize logger access
+use std::io::BufWriter;                   // to buffer logger output
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                         Define Executables Search Paths                             //
@@ -516,9 +519,6 @@ impl Runtime {
         let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", "");  // executables end in .exe on Windows but not on other platforms.
         trace!("Src executable: {}", src_executable);
 
-        // Debug: Print to stdout so it appears in the build log
-        println!("[WRAPPER] Intercepted: {} args={:?}", src_executable, input_args);
-
         let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
         trace!("Target executable names: {:?}", target_executable_names);
         
@@ -541,9 +541,6 @@ impl Runtime {
         
         if target_executable_names.0 != UNKNOWN_KEYWORD {final_args.insert(0, deputy_exe.clone())}
         let expect: String = deputy_exe.clone() + " died";
-
-        // Debug: Print final args to verify extra flags are added
-        println!("[WRAPPER] Final args: {:?}", final_args);
 
         Runtime {
             src_file: src_file,
@@ -593,7 +590,8 @@ impl FilterConfig {
     pub fn from_env() -> Self {
         let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
-            skip_split: skip_all || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
+            // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FLAGS opts it back in.
+            skip_split: skip_all || !env::var("WRAPPER_SPLIT_FLAGS").is_ok(),
             skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
             skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
             skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
@@ -610,6 +608,92 @@ impl FilterConfig {
             Err(_) => ARGS_CHAR_LIMIT,
         }
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//             Define DualLogger struct to log to stdout and file             //
+////////////////////////////////////////////////////////////////////////////////
+struct DualLogger {
+    file: Mutex<Option<BufWriter<File>>>,
+}
+
+impl DualLogger {
+    fn new() -> Self {
+        let file = if let Ok(path) = env::var("WRAPPER_LOG_FILE") {
+            match File::options().create(true).append(true).open(&path) {
+                Ok(f) => {
+                    // Print to stderr so the user knows logging is active
+                    eprintln!("[WRAPPER] Logging to file: {}", path);
+                    Some(BufWriter::new(f))
+                }
+                Err(e) => {
+                    eprintln!("[WRAPPER] Failed to open log file '{}': {}", path, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        DualLogger {
+            file: Mutex::new(file),
+        }
+    }
+}
+
+impl Log for DualLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Trace
+    }
+
+    fn log(&self, record: &Record) {
+        let level = record.level();
+        let target = record.target();
+        let args = record.args();
+        
+        let message = format!("[{}] [{}] {}", level, target, args);
+        
+        // Write to stdout (like env_logger default)
+        println!("{}", message);
+        
+        // Write to file if configured
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(ref mut writer) = *guard {
+                let _ = writeln!(writer, "{}", message);
+                let _ = writer.flush();
+            }
+        }
+    }
+
+    fn flush(&self) {
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(ref mut writer) = *guard {
+                let _ = writer.flush();
+            }
+        }
+    }
+}
+
+static LOGGER: LazyLock<DualLogger> = LazyLock::new(DualLogger::new);
+
+/// Initialize the dual logger. Call this at the start of each binary.
+///
+/// The verbosity is taken from the standard `RUST_LOG` variable (e.g. `trace`,
+/// `debug`, `info`, `warn`). When `RUST_LOG` is unset or holds an unrecognised
+/// value the default level is `error`, so the wrapper stays quiet unless told
+/// otherwise.
+pub fn init_logger() -> Result<(), log::SetLoggerError> {
+    log::set_logger(&*LOGGER).map(|()| {
+        let level = match env::var("RUST_LOG").as_deref() {
+            Ok("trace") => LevelFilter::Trace,
+            Ok("debug") => LevelFilter::Debug,
+            Ok("info") => LevelFilter::Info,
+            Ok("warn") => LevelFilter::Warn,
+            Ok("off") => LevelFilter::Off,
+            // Default level: only errors are surfaced.
+            _ => LevelFilter::Error,
+        };
+        log::set_max_level(level)
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -835,6 +919,12 @@ pub fn print_usage() -> bool {
     lines.extend(usage_pair(
         "RUST_LOG",
         "Set the diagnostic verbosity used by the wrapper. Standard env_logger variable; unset defaults to error.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_LOG_FILE",
+        "Path to a file where log messages will be written in addition to stdout. Same log level as RUST_LOG.",
         NAME_W,
         INNER,
     ));
@@ -1579,5 +1669,74 @@ mod tests {
             get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
         assert_eq!(extra, LLVM_LINKER_EXTRA_FLAGS);
         assert!(!extra.contains("-w"), "linker extra flags must not be compiler-only");
+    }
+
+    // ---- DualLogger file logging ------------------------------------------
+
+    #[test]
+    fn dual_logger_writes_to_file_when_configured() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+
+        let dir = std::env::temp_dir();
+        let log_path = dir.join("wrapper_test_dual_logger.log");
+
+        // Clean up any leftover file from a prior run
+        let _ = std::fs::remove_file(&log_path);
+
+        // Set the env var before constructing the logger
+        unsafe {
+            env::set_var("WRAPPER_LOG_FILE", &log_path);
+        }
+
+        let logger = DualLogger::new();
+
+        // Emit a log record directly through the Log trait
+        let record = log::Record::builder()
+            .args(format_args!("test message for file logger"))
+            .level(Level::Info)
+            .target("test_module")
+            .build();
+        logger.log(&record);
+        logger.flush();
+
+        // The file should now exist and contain our message
+        let content = std::fs::read_to_string(&log_path).expect("log file was not created");
+        assert!(
+            content.contains("test message for file logger"),
+            "log file did not contain the expected message: {content}"
+        );
+        assert!(
+            content.contains("INFO"),
+            "log file did not contain the log level: {content}"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+        unsafe {
+            env::remove_var("WRAPPER_LOG_FILE");
+        }
+    }
+
+    #[test]
+    fn dual_logger_no_file_when_var_unset() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+
+        // Make sure the var is not set
+        unsafe {
+            env::remove_var("WRAPPER_LOG_FILE");
+        }
+
+        let logger = DualLogger::new();
+
+        // Logging should not panic and should not create any file
+        let record = log::Record::builder()
+            .args(format_args!("should not be logged to file"))
+            .level(Level::Warn)
+            .target("test_module")
+            .build();
+        logger.log(&record);
+        logger.flush();
+
+        // No assertion about files — the key is that this does not panic
     }
 }
