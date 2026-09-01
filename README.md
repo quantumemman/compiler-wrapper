@@ -76,6 +76,10 @@ compile time** from environment variables, so they must be set when building:
 > expanded when the crate is compiled, not at runtime. They form the search
 > order used later when locating executables.
 
+<<<<<<< HEAD
+=======
+---
+>>>>>>> ddc5ab1 (Added file logging via WRAPPER_LOG_FILE that respects RUST_LOG log level. Updated unit tests and README.md.)
 ## Runtime behavior
 
 Print the full usage/help banner (also lists every runtime variable):
@@ -160,7 +164,7 @@ rewrites the argument list through these stages:
 
 ### Logging (`RUST_LOG`)
 
-Logging is provided by `env_logger` via the standard `RUST_LOG` variable (unset
+Logging is provided by a custom `DualLogger` via the standard `RUST_LOG` variable (unset
 ⇒ `error`). Higher values print wrapper diagnostics such as the located
 executable, family/kind classification and the final rewritten arguments:
 
@@ -168,6 +172,16 @@ executable, family/kind classification and the final rewritten arguments:
 set RUST_LOG=info       # found exe + family classification
 set RUST_LOG=debug      # + final argument list
 set RUST_LOG=trace      # + argument/name/expect internals, candidate search
+```
+
+### File logging (`WRAPPER_LOG_FILE`)
+
+By default, log messages are written to stdout only. Setting `WRAPPER_LOG_FILE` to a file path enables **dual logging** — the same messages are written to both stdout and the specified file (appended, created if it does not exist). The file log uses the same level as `RUST_LOG`:
+
+```sh
+set WRAPPER_LOG_FILE=wrapper_debug.log
+set RUST_LOG=debug
+clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 ```
 
 ---
@@ -189,12 +203,13 @@ set RUST_LOG=trace      # + argument/name/expect internals, candidate search
 | `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
 | `WRAPPER_ENABLE_PASSTHROUGH` | Bypass all processing and pass arguments through unchanged. |
 | `WRAPPER_OPTIONS` / `WRAPPER_HELP` | Print the help banner and exit. |
-| `RUST_LOG` | Set `env_logger` diagnostic verbosity (`error` default, up to `trace`). |
+| `RUST_LOG` | Set `DualLogger` diagnostic verbosity (`error` default, up to `trace`). |
+| `WRAPPER_LOG_FILE` | Path to a file for dual logging — log messages are written here in addition to stdout. Same level as `RUST_LOG`. |
 
 Each is a presence/flag variable: define it (to any value) to enable, except
-`WRAPPER_ARGS_CHAR_LIMIT`, which takes a number. Note that split now requires
-`WRAPPER_SPLIT_FLAGS` — it is the only step that is disabled unless explicitly
-requested.
+`WRAPPER_ARGS_CHAR_LIMIT` and `WRAPPER_LOG_FILE`, which take a value. Note that
+split now requires `WRAPPER_SPLIT_FLAGS` — it is the only step that is disabled
+unless explicitly requested.
 ---
 
 ## Testing
@@ -204,9 +219,11 @@ cargo test          # runs the library unit tests (argument pipeline)
 cargo test --lib    # targeted: only the src/lib.rs suite
 ```
 
-The tests cover splitting of fused flags, bad-flag removal, swap behavior,
-the `skip_*` combinations, extra-flag splicing, response-file emission, and the
-empty-argument `--version` fallback.
+The tests cover splitting of fused flags (slash- and dash-prefixed, mixed,
+bare-passthrough), bad-flag removal, swap behavior, the `skip_*` combinations,
+extra-flag splicing (placement rules, duplicate suppression, link-step
+guard), response-file emission (content, special characters, existing `@` arg),
+and the empty-argument `--version` fallback.
 
 ---
 
