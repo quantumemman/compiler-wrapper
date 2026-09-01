@@ -6,7 +6,7 @@ use std::process::{id};                   // for process id
 use std::string::String;                  // for String type
 use std::sync::LazyLock;                  // for LazyLock init
 use regex::Regex;                         // for Regex operations
-use log::{trace, debug, info, warn};      // logging macros with levels: trace, debug, info, warn, error
+use log::{trace, debug, info, warn, error};  // logging macros with levels: trace, debug, info, warn, error
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                         Define Executables Search Paths                             //
@@ -23,7 +23,7 @@ pub static PATHS: LazyLock<[&str; 6]> = LazyLock::new(|| {
         info!("Preferring Visual Studio LLVM toolchain");
         [&NVCC_PATH, &LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer VS LLVM
     } else {
-        info!("Preferring NVIDIA/AMD LLVM toolchain");
+        debug!("Preferring NVIDIA/AMD LLVM toolchain");
         [&NVCC_PATH, &LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer NVIDIA/AMD LLVM
     }
 });
@@ -97,9 +97,9 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-deprecated -Wno-author -Wno-unused-cli -Wno-ignored-attributes";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
-pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w -W0";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
 pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
 pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
@@ -162,22 +162,21 @@ fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
     if executable_name != UNKNOWN_KEYWORD {
         if !(EXTERNAL_WRAPPER_SIGNATURE.is_match(&executable_name) || Path::new(executable_name).is_absolute()) {
             for dir in paths {
-                // trace!("Searching for {} in {}", executable_name, dir);
                 let candidate = Path::new(dir).join(executable_name);
-                // On Windows, executables have the .exe extension; on other platforms they typically don't.
+                // Executables have a .exe extension on Windows, but not on other platforms.
                 let candidate = if cfg!(windows) {
                     candidate.with_extension("exe")
                 } else {
                     candidate
                 };
-                // trace!("Checking candidate path: {:?}", candidate);
+                trace!("Checking candidate path: {:?}", candidate);
                 if candidate.exists() && candidate.is_file() {
-                    trace!("Found {} in {}", executable_name, dir);
+                    debug!("Found {} in {}", executable_name, dir);
                     return Some(candidate.to_path_buf());
                 }
             }
         } else {
-            trace!("Executable is absolute or another wrapper, returning as is: {}", executable_name);
+            debug!("Executable is absolute or another wrapper, returning as is: {}", executable_name);
             return Some(PathBuf::from(executable_name));
         }
     }
@@ -311,14 +310,14 @@ fn apply_filter(input_args: Vec<String>, config: &FilterConfig, bad_flags: &Rege
 
     if final_args.iter().any(|a| a.starts_with('@')) {
         // rsp already used — pass through
-        info!("Response file already in use. Pass through.");
+        warn!("Response file already in use. Pass through.");
     } else if config.force_response_files || final_args.join(" ").len() > config.args_char_limit {
         // too long (or forced): make rsp
         // Use an absolute path in the temp directory so the spawned compiler can
         // always find the file regardless of its working directory.
         let rsp_name = RESPONSE_FILE_NAME.replace(".rsp", &format!("_{}.rsp", id()));
         let rsp_path = env::temp_dir().join(&rsp_name);
-        warn!("Creating response file: {}.", rsp_path.display());
+        error!("Creating response file: {}.", rsp_path.display());
         let mut f = File::create(&rsp_path).unwrap();
         for arg in &final_args { writeln!(f, "{}", arg).unwrap(); }
         final_args = vec![format!("@{}", rsp_path.display())];
@@ -456,10 +455,10 @@ impl Runtime {
         trace!("Target executable paths: {:?}", target_executable_paths);
         
         let (main_exe, deputy_exe): (String, String) = get_main_and_deputy_executable_paths(&target_executable_paths);
-        trace!("Main exe: {}, Deputy exe: {}", main_exe, deputy_exe);
+        info!("Main exe: {}, Deputy exe: {}", main_exe, deputy_exe);
         
         let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&deputy_exe);
-        trace!("Target classification: {:?}", target_classification);
+        debug!("Target classification: {:?}", target_classification);
         
         let (bad_flags, swap_pairs, extra_flags) = get_args_filter_pack(&target_classification);
         
@@ -487,14 +486,14 @@ impl Runtime {
     }
 
     pub fn print_info(&self) {
-        trace!("Src File: {}", self.src_file);
-        trace!("Src Executable: {}", self.src_executable);
-        trace!("Input Args: {:?}", self.input_args);
-        trace!("Target Executable Names: {:?}", self.target_executable_names);
+        debug!("Src File: {}", self.src_file);
+        debug!("Src Executable: {}", self.src_executable);
+        info!("Input Args: {:?}", self.input_args);
+        debug!("Target Executable Names: {:?}", self.target_executable_names);
+        warn!("Target Classification: {:?}", self.target_classification);
         info!("Target Executable Paths: {:?}", self.target_executable_paths);
-        info!("Target Classification: {:?}", self.target_classification);
-        debug!("Final Args: {:?}", self.final_args);
-        trace!("Expect: {}", self.expect);
+        warn!("Final Args: {:?}", self.final_args);
+        debug!("Expect: {}", self.expect);
     }
 }
 
