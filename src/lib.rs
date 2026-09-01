@@ -6,7 +6,10 @@ use std::process::{id};                   // for process id
 use std::string::String;                  // for String type
 use std::sync::LazyLock;                  // for LazyLock init
 use regex::Regex;                         // for Regex operations
-use log::{trace, debug, info, warn, error};  // logging macros with levels: trace, debug, info, warn, error
+use log::{trace, debug, info, warn, error}; // log levels for RUST_LOG from most verbose to least verbose
+use log::{Level, LevelFilter, Metadata, Record, Log}; // log traits to be used to implement custom dual logger
+use std::sync::Mutex;                     // to synchronize logger access
+use std::io::BufWriter;                   // to buffer logger output
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                         Define Executables Search Paths                             //
@@ -517,9 +520,6 @@ impl Runtime {
         let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", "");  // executables end in .exe on Windows but not on other platforms.
         trace!("Src executable: {}", src_executable);
 
-        // Debug: Print to stdout so it appears in the build log
-        println!("[WRAPPER] Intercepted: {} args={:?}", src_executable, input_args);
-
         let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
         trace!("Target executable names: {:?}", target_executable_names);
         
@@ -542,9 +542,6 @@ impl Runtime {
         
         if target_executable_names.0 != UNKNOWN_KEYWORD {final_args.insert(0, deputy_exe.clone())}
         let expect: String = deputy_exe.clone() + " died";
-
-        // Debug: Print final args to verify extra flags are added
-        println!("[WRAPPER] Final args: {:?}", final_args);
 
         Runtime {
             src_file: src_file,
@@ -614,368 +611,90 @@ impl FilterConfig {
     }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//                              Executables Search Paths                               //
-/////////////////////////////////////////////////////////////////////////////////////////
-pub const HIP_PATH: &str = env!("HIP_PATH_");
-pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");
-pub const MSVC_PATH: &str = env!("MSVC_PATH_");
-pub const LLVM_PATH: &str = env!("LLVM_PATH_");
-pub const GCC_PATH: &str = env!("GCC_PATH_");
-pub const PY_SCRIPTS_PATH: &str = env!("PY_PATH_");
-pub static PATHS: LazyLock<[&str; 6]> = LazyLock::new(|| {
-    // If WRAPPER_PREFER_VS is defined, prefer Visual Studio's LLVM toolchain; otherwise prefer ROCm LLVM.
-    if env::var("WRAPPER_PREFER_VS").is_ok() {
-        info!("Preferring Visual Studio LLVM toolchain");
-        [&HIP_PATH, &LLVM_PATH_VS, &MSVC_PATH, &LLVM_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer VS LLVM
-    } else {
-        info!("Preferring ROCm LLVM toolchain");
-        [&HIP_PATH, &LLVM_PATH, &LLVM_PATH_VS, &MSVC_PATH, &GCC_PATH, &PY_SCRIPTS_PATH] // Prefer ROCm LLVM
-    }
-});
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//                                Executables Keywords                                 //
-/////////////////////////////////////////////////////////////////////////////////////////
-pub static wrapperKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)ccache"#).unwrap());
-pub static compilerKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|hip|cl|gcc|g\+\+)"#).unwrap());
-pub static linkerKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(link|lld|ld)"#).unwrap());
-
-pub static llvmKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(clang|llvm|lld)"#).unwrap());
-pub static msvcKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(cl|link)"#).unwrap());
-pub static gccKeywords: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//                  Define Bad Flag Regexes, -/ start, case sensitive                  //
-/////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVMCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](EHsc|permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
-pub static MSVCCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wlogical-op-parentheses|Wunknown-warning-option)$"#).unwrap());
-pub static GCCCompilerBadFlags: LazyLock<Regex> = LazyLock::new(||Regex::new(r#""#).unwrap());
-
-pub static LLVMLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
-pub static MSVCLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](INCREMENTAL:NO|MANIFEST:EMBED|MANIFEST:EMBED,ID=2)$"#).unwrap()); // |MANIFESTUAC:NO
-pub static GCCLinkerBadFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""#).unwrap());
-
-pub static SplitFlags: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/](Fd|Fo)"#).unwrap());
-
-//////////////////////////////////////////////////////////////////////////////////////////
-//                             Swap Problematic Arguments                               //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVMCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[-]D[/]bigobj$").expect(BadMatchMessage), "".into()),
-        (Regex::new(r"^[/]MD\(d\)?$").expect(BadMatchMessage), "-fms-extensions".into()),
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "-g".into()),
-        (Regex::new(r"^[/]01$").expect(BadMatchMessage), "-01".into()),
-        (Regex::new(r"^[/]02$").expect(BadMatchMessage), "-02".into()),
-        (Regex::new(r"^[/]03$").expect(BadMatchMessage), "-03".into()),
-        (Regex::new(r"^[/]04$").expect(BadMatchMessage), "-04".into()),
-]});
-
-// Swaps: pattern regex → replacement
-pub static MSVCCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "/Z7".into()),
-]});
-
-// Swaps: pattern regex → replacement
-pub static LLVMLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
-]});
-
-// Swaps: pattern regex → replacement
-pub static MSVCLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
-]});
-
-// Swaps: pattern regex → replacement
-pub static GCCCompilerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[/]Zi$").expect(BadMatchMessage), "-g".into()),
-]});
-
-// Swaps: pattern regex → replacement
-pub static GCCLinkerSwapPairs: LazyLock<Vec<(Regex, String)>> = LazyLock::new(||{
-    vec![
-        (Regex::new(r"^[/]LTCG$").expect(BadMatchMessage), "-flto".into()),
-]});
-
-//////////////////////////////////////////////////////////////////////////////////////////
-//                                 Extraflags to tack on                                //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVMCompilerExtraFlags: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-error -Wno-c++11-narrowing -Wno-incompatible-pointer-types -Wno-implicit-function-declaration -Wno-extern-initializer -Wno-unused-variable -Wno-unused-function -Wno-logical-op-parentheses -Wno-unknown-warning-option -Wno-microsoft-cast -Wno-c++98-compat -Wno-microsoft-include -w";
-pub const LLVMLinkerExtraFlags: &str = "/MANIFEST:NO";
-pub const MSVCCompilerExtraFlags: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -Wno-errror=implicit-function-declaration -Wno-errror=extern-initializer -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=logical-op-parentheses -w -FS";
-pub const MSVCLinkerExtraFlags: &str = "";
-pub const GCCCompilerExtraFlags: &str = "-w";
-pub const GCCLinkerExtraFlags: &str = "";
-pub const BadMatchMessage: &str = "bad match";
-pub const ResponseFileName: &str = "response_file.rsp";
-pub const ArgsCharLimit: usize = 30000;
-
-#[derive(Debug)]
-pub enum EXEFamily {
-    LLVM,         // clang, clang++, gcc, g++, lld-link
-    MSVC,         // cl, clang-cl, link
-    GCC,          // gcc, g++, ld
-    UNKNOWN,      // default classification, sccache
+////////////////////////////////////////////////////////////////////////////////
+//             Define DualLogger struct to log to stdout and file             //
+////////////////////////////////////////////////////////////////////////////////
+struct DualLogger {
+    file: Mutex<Option<BufWriter<File>>>,
 }
 
-#[derive(Debug)]
-pub enum EXEKind {
-    COMPILER,    // compiler, e.g. clang, clang-cl, hipcc, gcc, g++
-    LINKER,      // linker, e.g. link, lld-link, ld
-    UNKNOWN,     // default classification, this will throw an error
-}
-
-pub fn getName(src: &String, args: &Vec<String>) -> (String, String) {
-    let baseName = Path::new(&src).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", ".exe");
-    let mut wrapperName = "unknown".to_string();
-    let mut exeName = baseName.strip_prefix("sccache-").unwrap_or(&baseName).to_string(); // handle sccache-clang.exe, sccache-link.exe, etc.
-    if wrapperKeywords.is_match(&baseName) {
-        wrapperName = "sccache.exe".to_string();
-    }
-    if wrapperKeywords.is_match(&exeName) {
-        exeName = args.get(0).unwrap_or(&"unknown".to_string()).to_string();
-    }
-    return (wrapperName, exeName);
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////
-//                                   Find file                                          //
-//////////////////////////////////////////////////////////////////////////////////////////
-pub fn getEXE(name: &(String, String)) -> (String, String) {
-    let wrapperPath: String = findFile(&name.0, &*PATHS).unwrap_or("unknown".into()).to_str().unwrap_or("").to_string();    
-    let exePath: String = findFile(&name.1, &*PATHS).unwrap_or("unknown".into()).to_str().unwrap_or("").to_string();
-    return (wrapperPath.replace("\\", "/"), exePath.replace("\\", "/"));
-}
-
-fn findFile(name: &str, paths: &[&str]) -> Option<PathBuf> {
-    if name != "unknown" {
-        let ext = "exe";
-        for dir in paths {
-            trace!("Searching for {} in {}", name, dir);
-            let candidate = Path::new(dir).join(name).with_extension(ext);
-            trace!("Checking candidate path: {:?}", candidate);
-            if candidate.exists() && candidate.is_file() {
-                return Some(candidate.to_path_buf());
-            }
-        }
-    }
-    None
-}
-
-// Classify the exe kind based on its name using keywords
-pub fn getEXEFamily(name: &(String, String)) -> (EXEFamily, EXEKind) {
-    let mut exeFamily = EXEFamily::UNKNOWN;
-    let mut exeKind = EXEKind::UNKNOWN;
-    
-    if name.1.contains("clang-cl") {                  // clang-cl is MSVC-compatible
-        exeFamily = EXEFamily::MSVC;
-    } else if llvmKeywords.is_match(&name.1) {        // LLVM family—add whatever shows up
-        exeFamily = EXEFamily::LLVM;
-    } else if msvcKeywords.is_match(&name.1) {        // Pure MSVC first—avoid false positives
-        exeFamily = EXEFamily::MSVC;
-    } else if gccKeywords.is_match(&name.1) {         // GCC family—add whatever shows up
-        exeFamily = EXEFamily::GCC;
-    }
-    
-    if compilerKeywords.is_match(&name.1) { // Pure compiler next—avoid false positives
-        exeKind = EXEKind::COMPILER;
-    } else if linkerKeywords.is_match(&name.1) {   // Pure MSVC first—avoid false positives
-        exeKind = EXEKind::LINKER;
-    }
-    
-    return (exeFamily, exeKind);
-}
-
-// Regular method
-pub fn getFlags(family: &(EXEFamily, EXEKind)) -> (Regex, Vec<(Regex, String)>, &str) {
-    match family {
-        (EXEFamily::LLVM, EXEKind::COMPILER) => (LLVMCompilerBadFlags.clone(), LLVMCompilerSwapPairs.clone(), LLVMCompilerExtraFlags),
-        (EXEFamily::MSVC, EXEKind::COMPILER) => (MSVCCompilerBadFlags.clone(), MSVCCompilerSwapPairs.clone(), MSVCCompilerExtraFlags),
-        (EXEFamily::GCC, EXEKind::COMPILER) => (GCCCompilerBadFlags.clone(), GCCCompilerSwapPairs.clone(), GCCCompilerExtraFlags),
-        (EXEFamily::LLVM, EXEKind::LINKER) => (LLVMLinkerBadFlags.clone(), LLVMLinkerSwapPairs.clone(), LLVMLinkerExtraFlags),
-        (EXEFamily::MSVC, EXEKind::LINKER) => (MSVCLinkerBadFlags.clone(), MSVCLinkerSwapPairs.clone(), MSVCLinkerExtraFlags),
-        (EXEFamily::GCC, EXEKind::LINKER) => (GCCLinkerBadFlags.clone(), GCCLinkerSwapPairs.clone(), GCCLinkerExtraFlags),
-        _ => panic!("Invalid family and kind"), // Add this later if needed
-    }
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//                                   Filter Arguments                                  //
-/////////////////////////////////////////////////////////////////////////////////////////
-// Per-call configuration controlling which filtering steps run. Derived from env vars
-// in `filterArgs`; kept as data so the pure logic in `applyFilter` is unit-testable
-// without mutating global process environment (which is unsafe across parallel tests).
-#[derive(Default)]
-pub struct FilterConfig {
-    pub skip_split: bool,           // skip splitting fused /Fd<dir> /Fo<dir> flags
-    pub skip_bad: bool,             // skip removing bad flags
-    pub skip_swap: bool,            // skip swapping problematic flags
-    pub skip_add: bool,             // skip appending extra helpful flags
-    pub skip_version_on_empty: bool, // skip auto-adding --version when args is empty
-    pub force_response_files: bool, // always use a response file (regardless of length)
-    pub args_char_limit: usize,     // override for the argument character limit
-}
-
-impl FilterConfig {
-    // Reads the WRAPPER_* environment variables into a FilterConfig.
-    pub fn from_env() -> Self {
-        let skipAll = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
-        FilterConfig {
-            skip_split: skipAll || env::var("WRAPPER_SKIP_SPLIT_FLAGS").is_ok(),
-            skip_bad: skipAll || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
-            skip_swap: skipAll || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
-            skip_add: skipAll || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
-            skip_version_on_empty: env::var("WRAPPER_SKIP_VERSION_ON_EMPTY").is_ok(),
-            force_response_files: env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
-            args_char_limit: FilterConfig::argsCharLimit(),
-        }
-    }
-
-    // Resolves the effective character limit, honoring WRAPPER_ARGS_CHAR_LIMIT.
-    fn argsCharLimit() -> usize {
-        match env::var("WRAPPER_ARGS_CHAR_LIMIT") {
-            Ok(v) => v.trim().parse::<usize>().unwrap_or(ARGS_CHAR_LIMIT),
-            Err(_) => ARGS_CHAR_LIMIT,
-        }
-    }
-}
-
-// Applies the filtering pipeline described by `config`. Pure aside from writing the
-// response file when args get too long (or are forced through).
-fn applyFilter(
-    args: Vec<String>,
-    config: &FilterConfig,
-    BadFlags: Regex,
-    SwapPairs: Vec<(Regex, String)>,
-    ExtraFlags: String,
-) -> Vec<String> {
-    // Split fused flag+directory args (e.g. /Fdsome\target\directory -> /Fd + some\target\directory)
-    // BEFORE the swap/bad loop, because one fused arg expands into two and the array grows.
-    // An arg that is exactly the flag (already standalone) passes through unchanged.
-    let mut expanded: Vec<String> = Vec::new();
-    if !config.skip_split {
-        for arg in args {
-            if let Some(cap) = SplitFlags.captures(&arg) {
-                let full = cap.get(0).unwrap().as_str();
-                if full.len() < arg.len() {                       // fused flag + directory
-                    expanded.push(format!("/F{}", cap.get(1).unwrap().as_str()[1..].to_lowercase()));
-                    expanded.push(arg[full.len()..].to_string()); // directory part
-                } else {                                          // exactly /Fd or /Fo
-                    expanded.push(arg);
+impl DualLogger {
+    fn new() -> Self {
+        let file = if let Ok(path) = env::var("WRAPPER_LOG_FILE") {
+            match File::options().create(true).append(true).open(&path) {
+                Ok(f) => {
+                    // Print to stderr so the user knows logging is active
+                    eprintln!("[WRAPPER] Logging to file: {}", path);
+                    Some(BufWriter::new(f))
                 }
-            } else {
-                expanded.push(arg);
-            }
-        }
-    } else {
-        expanded = args;
-    }
-
-    // final arguments
-    let mut finalArgs: Vec<String> = Vec::new();
-    for arg in expanded {
-        if !config.skip_bad && BadFlags.is_match(&arg) { continue; } // Drop if bad
-        let mut newArg = arg.clone();                             // Swap if match
-        if !config.skip_swap {
-            for (re, swap) in &*SwapPairs {
-                if re.is_match(&arg) {
-                    newArg = re.replace(&arg, swap.clone()).trim().to_string();
-                    break;
+                Err(e) => {
+                    eprintln!("[WRAPPER] Failed to open log file '{}': {}", path, e);
+                    None
                 }
             }
+        } else {
+            None
+        };
+        DualLogger {
+            file: Mutex::new(file),
         }
-        if !newArg.is_empty() {
-            finalArgs.push(newArg);
-        }
     }
-
-    if finalArgs.is_empty() && !config.skip_version_on_empty {
-        finalArgs.push("--version".into());
-    } else if !config.skip_add
-        && finalArgs.len() > 1
-        && !ExtraFlags.is_empty()
-        && finalArgs.iter().any(|a| a == "-x")
-    {
-        let index = finalArgs.iter().position(|a| a == "-x").unwrap();
-        if finalArgs[index + 2] != ExtraFlags.split(" ").next().unwrap() {  // Avoid inserting extra flags twice
-            finalArgs.splice(index + 2..index + 2, ExtraFlags.split(" ").map(|s| s.into())); }
-    }
-
-    if finalArgs.iter().any(|a| a.starts_with('@')) {
-        // rsp already used—pass through
-    } else if config.force_response_files || finalArgs.join(" ").len() > config.args_char_limit {
-        // too long (or forced): make rsp
-        let rsp_path = &ResponseFileName.replace(".rsp", &format!("_{}.rsp", id()).to_owned());
-        let mut f = File::create(&rsp_path).unwrap();
-        for arg in &finalArgs { writeln!(f, "{}", arg).unwrap(); }  // or space/newline
-        finalArgs = vec![format!("@{}", &rsp_path)];
-    }
-    return finalArgs;
 }
 
-// Define the struct (your "class")
-pub struct Kind {
-    pub exe: String,                  // "name-rs.exe"
-    pub src: String,                  // "src/name.rs"
-    pub args: Vec<String>,            // (arg1, arg2, arg3, ...)
-    pub name: (String, String),       // ("wrapper.exe", "name.exe")
-    pub EXE: (String, String),        // ("C:/path/to/wrapper/bin/wrapper.exe", "C:/path/to/llvm/bin/name.exe")
-    pub family: (EXEFamily, EXEKind), // (LLVM, Compiler), (LLVM, Linker), (MSVC, Compiler), (MSVC, Linker), (UNKNOWN, UNKNOWN)
-    pub finalArgs: Vec<String>,       // (arg1, arg2, arg3, ...)
-    pub expect: String,               // "name died"
-}
+impl Log for DualLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Trace
+    }
 
-// Impl block = where methods live
-impl Kind {
-    // Constructor
-    pub fn new(src: String, args: Vec<String>) -> Self {
-        let exe: String = env::current_exe().expect("name.exe").to_str().unwrap_or("").to_string().replace("\\", "/");
-        let src: String = src.replace("\\", "/");
-        let args: Vec<String> = args;
-        let name: (String, String) = getName(&src, &args);
-        let EXE: (String, String) = getEXE(&name);
-        let family: (EXEFamily, EXEKind) = getEXEFamily(&name);
-        let (regex, swap_pairs, extra_flags) = getFlags(&family);
-        let finalArgs: Vec<String> = filterArgs(args.clone(), regex, swap_pairs, extra_flags.to_string());
-        let expect: String = name.1.clone() + " died";
+    fn log(&self, record: &Record) {
+        let level = record.level();
+        let target = record.target();
+        let args = record.args();
         
-        Kind {
-            exe,
-            src,
-            args,
-            name,
-            EXE,
-            family,
-            finalArgs,
-            expect,
+        let message = format!("[{}] [{}] {}", level, target, args);
+        
+        // Write to stdout (like env_logger default)
+        println!("{}", message);
+        
+        // Write to file if configured
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(ref mut writer) = *guard {
+                let _ = writeln!(writer, "{}", message);
+                let _ = writer.flush();
+            }
         }
-    }
-    
-    pub fn getEXE(&self) -> String {
-        let (wrapper, exe) = &self.EXE;
-        if wrapper != "unknown" {
-            return wrapper.clone();
-        } else if exe != "unknown" {
-            return exe.clone();
-        }
-        return "unknown".to_string();
     }
 
-    pub fn printInfo(&self) {
-        trace!("Received Exe: {}", self.exe);
-        trace!("Src File : {}", self.src);
-        trace!("Input Args: {:?}", self.args);
-        trace!("Processed Name: {:?}", self.name);
-        info!("Found EXE: {:?}", self.EXE);
-        info!("Family: {:?}", self.family);
-        debug!("FinalArgs: {:?}", self.finalArgs);
-        trace!("Expect: {}", self.expect);
+    fn flush(&self) {
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(ref mut writer) = *guard {
+                let _ = writer.flush();
+            }
+        }
     }
+}
+
+static LOGGER: LazyLock<DualLogger> = LazyLock::new(DualLogger::new);
+
+/// Initialize the dual logger. Call this at the start of each binary.
+///
+/// The verbosity is taken from the standard `RUST_LOG` variable (e.g. `trace`,
+/// `debug`, `info`, `warn`). When `RUST_LOG` is unset or holds an unrecognised
+/// value the default level is `error`, so the wrapper stays quiet unless told
+/// otherwise.
+pub fn init_logger() -> Result<(), log::SetLoggerError> {
+    log::set_logger(&*LOGGER).map(|()| {
+        let level = match env::var("RUST_LOG").as_deref() {
+            Ok("trace") => LevelFilter::Trace,
+            Ok("debug") => LevelFilter::Debug,
+            Ok("info") => LevelFilter::Info,
+            Ok("warn") => LevelFilter::Warn,
+            Ok("off") => LevelFilter::Off,
+            // Default level: only errors are surfaced.
+            _ => LevelFilter::Error,
+        };
+        log::set_max_level(level)
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1201,6 +920,12 @@ pub fn print_usage() -> bool {
     lines.extend(usage_pair(
         "RUST_LOG",
         "Set the diagnostic verbosity used by the wrapper. Standard env_logger variable; unset defaults to error.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_LOG_FILE",
+        "Path to a file where log messages will be written in addition to stdout. Same log level as RUST_LOG.",
         NAME_W,
         INNER,
     ));
@@ -1952,5 +1677,74 @@ mod tests {
             get_args_filter_pack(&(ExecutableFamily::LLVM, ExecutableKind::LINKER));
         assert_eq!(extra, LLVM_LINKER_EXTRA_FLAGS);
         assert!(!extra.contains("-w"), "linker extra flags must not be compiler-only");
+    }
+
+    // ---- DualLogger file logging ------------------------------------------
+
+    #[test]
+    fn dual_logger_writes_to_file_when_configured() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+
+        let dir = std::env::temp_dir();
+        let log_path = dir.join("wrapper_test_dual_logger.log");
+
+        // Clean up any leftover file from a prior run
+        let _ = std::fs::remove_file(&log_path);
+
+        // Set the env var before constructing the logger
+        unsafe {
+            env::set_var("WRAPPER_LOG_FILE", &log_path);
+        }
+
+        let logger = DualLogger::new();
+
+        // Emit a log record directly through the Log trait
+        let record = log::Record::builder()
+            .args(format_args!("test message for file logger"))
+            .level(Level::Info)
+            .target("test_module")
+            .build();
+        logger.log(&record);
+        logger.flush();
+
+        // The file should now exist and contain our message
+        let content = std::fs::read_to_string(&log_path).expect("log file was not created");
+        assert!(
+            content.contains("test message for file logger"),
+            "log file did not contain the expected message: {content}"
+        );
+        assert!(
+            content.contains("INFO"),
+            "log file did not contain the log level: {content}"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+        unsafe {
+            env::remove_var("WRAPPER_LOG_FILE");
+        }
+    }
+
+    #[test]
+    fn dual_logger_no_file_when_var_unset() {
+        let _guard = RSP_MUTEX.lock().unwrap();
+
+        // Make sure the var is not set
+        unsafe {
+            env::remove_var("WRAPPER_LOG_FILE");
+        }
+
+        let logger = DualLogger::new();
+
+        // Logging should not panic and should not create any file
+        let record = log::Record::builder()
+            .args(format_args!("should not be logged to file"))
+            .level(Level::Warn)
+            .target("test_module")
+            .build();
+        logger.log(&record);
+        logger.flush();
+
+        // No assertion about files — the key is that this does not panic
     }
 }
