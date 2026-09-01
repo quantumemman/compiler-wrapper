@@ -43,8 +43,8 @@ pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"(?i)(gc
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
-pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^([-/](clang:))?[-/](permissive-|bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
+pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^([-/](clang:))?[-/](bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap());
 pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(||Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap());
 
 pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[/]INCREMENTAL:NO$"#).unwrap());
@@ -351,16 +351,6 @@ fn is_source_arg(a: &str) -> bool {
         .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext.as_str()))
 }
 
-// Heuristic: is this a compile step rather than a link step? True when `-x`/`-c`/
-// `-S`/`-E` appear, or a non-flag argument names a source file. Object/library/
-// response-file inputs alone imply a link.
-fn is_compile_step(args: &[String]) -> bool {
-    if args.iter().any(|a| matches!(a.as_str(), "-x" | "-c" | "-S" | "-E")) {
-        return true;
-    }
-    args.iter().any(|a| is_source_arg(a))
-}
-
 // Insert `extra` tokens at `at`, preserving the relative order of every other
 // argument so no flag/value pair is ever split.
 fn splice_at(args: &mut Vec<String>, at: usize, extra: &[String]) {
@@ -374,51 +364,130 @@ fn splice_at(args: &mut Vec<String>, at: usize, extra: &[String]) {
 // the *options* region of the command — never appended after a `--` / the source
 // file, where clang-cl treats trailing tokens as linker/input arguments.
 //
-// Placement rules, in priority order:
-//   * `-x <lang>` anchor: flags land right after the language token. Bounds-checked
-//     so a bare/trailing `-x` can no longer panic (the old code indexed i+2 blindly).
-//   * `--` separator: everything after `--` is positional, so flags are inserted just
-//     before it (this is the CMake/clang-cl shape: `... /Fo<o> /Fd<d> -c -- src.c`).
-//   * otherwise, before the first source file — the natural end of the options list;
-//     stopping only at a source token guarantees a preceding `-o <out>` / `-Fo...`
-//     flag+value pair is never split.
-//   * fallback: only append at the end for a clear compile step; a pure link (objects
-//     + `-o`) is left untouched so compiler-only flags never leak into a link.
+// Placement strategy:
+//   * Find the end of the options section — after the last flag but before any
+//     source files, object files, libraries, or `--` separator.
+//   * This ensures suppression flags (like `-Wno-everything`) come AFTER all
+//     existing warning-enabling flags, making them effective.
+//   * Flag+value pairs (e.g., "-I path") are handled correctly by skipping the value.
 //   * Duplicate sets and empty/passthrough lists are ignored.
 fn insert_extra_flags(args: &mut Vec<String>, extra: &[String]) {
     if args.is_empty() || extra.is_empty() {
         return;
     }
-    // If any token is already present, assume the whole set was added before.
-    if extra.iter().any(|f| args.contains(f)) {
+    
+    // Skip pure link steps (object/library files without source files) to avoid
+    // leaking compiler-only flags into a link invocation.
+    if is_pure_link_step(args) {
         return;
     }
+    // Only add extra flags that are not already present in the args.
+    // This avoids duplicating flags while still adding missing ones.
+    let missing_extra: Vec<String> = extra
+        .iter()
+        .filter(|f| !args.contains(f))
+        .cloned()
+        .collect();
 
-    if let Some(x_pos) = args.iter().position(|a| a == "-x") {
-        let mut at = x_pos + 1;
-        if at < args.len() {
-            at += 1; // skip the language token, land before the inputs
+    if missing_extra.is_empty() {
+        return;
+    }
+    
+    // Find the end of the options section - after all existing flags
+    let insert_pos = find_options_end(args);
+    splice_at(args, insert_pos, &missing_extra);
+}
+
+/// Find the end of the options section.
+/// Returns the position after the last flag, but before any source files,
+/// object files, libraries, or `--` separator.
+///
+/// This handles flag+value pairs (e.g., "-I path") by skipping the value.
+/// A bare flag that expects a value (e.g., `-x` with nothing after) is treated
+/// as a standalone flag to avoid going out of bounds.
+fn find_options_end(args: &[String]) -> usize {
+    let n = args.len();
+    let mut i = 0;
+
+    // Flags that take a separate value as the next argument.
+    // These are common compiler/linker flags where the value is a separate token.
+    const FLAGS_WITH_VALUE: &[&str] = &[
+        // Include paths
+        "-I", "/I",
+        // Library paths and libraries
+        "-L", "/L", "-l",
+        // Defines
+        "-D", "/D",
+        // Output files
+        "-o", "-Fo", "/Fo", "-Fd", "/Fd", "-Fe", "/Fe",
+        "-Fa", "/Fa", "-Fm", "/Fm", "-Fp", "/Fp",
+        "-FR", "/FR", "-FU", "/FU",
+        // Language specification
+        "-x",
+        // Preprocessor flags
+        "-Xpreprocessor", "-include", "-imacros",
+        // System root and include paths
+        "-isysroot", "-isystem", "-idirafter", "-iprefix",
+        "-iwithprefix", "-iwithprefixbefore",
+        // Linker flags
+        "-Xlinker",
+        // Clang-specific
+        "-Xclang",
+        // Standard specification
+        "-std",
+        // Profile-guided optimization
+        "-fprofile-generate", "-fprofile-use",
+        // Coverage
+        "-coverage",
+    ];
+
+    while i < n {
+        let arg = &args[i];
+
+        // Stop at source files
+        if is_source_arg(arg) {
+            break;
         }
-        splice_at(args, at, extra);
-        return;
+
+        // Stop at `--` separator
+        if arg == "--" {
+            break;
+        }
+
+        // Check if this is a flag that takes a value
+        let takes_value = FLAGS_WITH_VALUE.iter().any(|&f| arg == f);
+
+        if takes_value {
+            // Skip the flag and its value (if present).
+            // Bounds-check: a bare flag at the end (e.g., `-x` with nothing after)
+            // is treated as a standalone flag to avoid going out of bounds.
+            if i + 1 < n {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        } else if arg.starts_with('-') || arg.starts_with('/') {
+            // This is a standalone flag
+            i += 1;
+        } else {
+            // This is a positional argument (object file, library, etc.)
+            break;
+        }
     }
 
-    // `--` ends option parsing: everything after it is positional (input/link) args.
-    if let Some(sep) = args.iter().position(|a| a == "--") {
-        splice_at(args, sep, extra);
-        return;
-    }
+    i
+}
 
-    // No `--`: stop at the start of the source list, keeping options together ahead.
-    if let Some(src) = args.iter().position(|a| is_source_arg(a)) {
-        splice_at(args, src, extra);
-        return;
-    }
-
-    // No `-x`/`--`/source: only add flags to a clear compile step; leave links alone.
-    if is_compile_step(args) {
-        splice_at(args, args.len(), extra);
-    }
+/// Check if the arguments represent a pure link step (object/library files
+/// without any source files). Extra compiler-only flags should not be inserted
+/// for pure link steps.
+fn is_pure_link_step(args: &[String]) -> bool {
+    let has_object = args.iter().any(|a| {
+        let lower = a.to_lowercase();
+        lower.ends_with(".obj") || lower.ends_with(".o") || lower.ends_with(".lib") || lower.ends_with(".a")
+    });
+    let has_source = args.iter().any(|a| is_source_arg(a));
+    has_object && !has_source
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -447,7 +516,10 @@ impl Runtime {
         let mut final_args: Vec<String>;
         let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().replace(".rs", "");  // executables end in .exe on Windows but not on other platforms.
         trace!("Src executable: {}", src_executable);
-        
+
+        // Debug: Print to stdout so it appears in the build log
+        println!("[WRAPPER] Intercepted: {} args={:?}", src_executable, input_args);
+
         let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
         trace!("Target executable names: {:?}", target_executable_names);
         
@@ -470,6 +542,9 @@ impl Runtime {
         
         if target_executable_names.0 != UNKNOWN_KEYWORD {final_args.insert(0, deputy_exe.clone())}
         let expect: String = deputy_exe.clone() + " died";
+
+        // Debug: Print final args to verify extra flags are added
+        println!("[WRAPPER] Final args: {:?}", final_args);
 
         Runtime {
             src_file: src_file,
@@ -1637,11 +1712,14 @@ mod tests {
             &no_swaps(),
             &extra,
         );
+        // FLAG2 is added at the end of the options section (before positional args)
+        // FLAG1 is already present so it's not duplicated
         assert_eq!(
             result,
             vec![
                 "-x".to_string(),
                 "a.c".to_string(),
+                "FLAG2".to_string(),
                 "FLAG1".to_string(),
                 "b".to_string(),
             ]
