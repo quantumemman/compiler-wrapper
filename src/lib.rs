@@ -100,9 +100,9 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -fms-extensions -w -Wno-everything";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
-pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w -W0";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -fms-extensions -w -W0";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
 pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
 pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
