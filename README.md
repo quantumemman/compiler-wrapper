@@ -34,16 +34,16 @@ wrapper/
 
 | Wrapper (`cargo build` target) | Underlying tool it dispatches to |
 |--------------------------------|----------------------------------|
-| `cl-rs`        | MSVC C/C++ compiler (`cl`) |
-| `clang-rs`     | Clang C compiler |
-| `clangpp-rs`   | Clang++ C++ compiler |
-| `clang-cl-rs`  | Clang in MSVC-compatible mode (`clang-cl`) |
-| `gcc-rs`       | GNU GCC |
-| `gpp-rs`       | GNU G++ |
-| `link-rs`      | MSVC linker (`link`) |
-| `lld-link-rs`  | LLVM `lld-link` |
-| `ld-rs`        | GNU `ld` |
-| `sccache-rs`   | `sccache` (pass-through driver) |
+| `cl-rs`                  | MSVC C/C++ compiler (`cl`) |
+| `clang-rs`               | Clang C compiler |
+| `clangpp-rs`             | Clang++ C++ compiler |
+| `clang-cl-rs`            | Clang in MSVC-compatible mode (`clang-cl`) |
+| `gcc-rs`                 | GNU GCC |
+| `gpp-rs`                 | GNU G++ |
+| `link-rs`                | MSVC linker (`link`) |
+| `lld-link-rs`            | LLVM `lld-link` |
+| `ld-rs`                  | GNU `ld` |
+| `sccache-rs`             | `sccache` (pass-through driver) |
 | `sccache-clang-rs`, `sccache-clangpp-rs`, `sccache-clang-cl-rs` | `sccache` + Clang family |
 | `sccache-gcc-rs`, `sccache-gpp-rs` | `sccache` + GCC/G++ |
 
@@ -155,9 +155,23 @@ rewrites the argument list through these stages:
 
 ### Classification
 
-* **Family** — `LLVM` (`clang|llvm|lld`, but `clang-cl` ⇒ MSVC), `MSVC`
-  (`cl|link`), `GCC` (`gcc|g++|ld`).
-* **Kind** — `COMPILER` (`clang|cl|gcc|g++`) or `LINKER` (`link|lld|ld`).
+The exact bad/swap/extra flags are chosen by classifying the target deputy
+executable from its name:
+
+* **Family** — `clang-cl` is treated as MSVC (checked first), else `LLVM`
+  (`clang|llvm|lld`), `MSVC` (`cl|link`), `GCC` (`gcc|g++|ld`), or `UNKNOWN`.
+* **Kind** — `COMPILER` (`clang|cl|gcc|g++`) is prioritized over `LINKER`
+  (`link|lld|ld`), else `UNKNOWN` / `WRAPPER` (`sccache`, `ccache`).
+
+Each (family, kind) pair maps to a filter pack:
+| Pack | Bad flags (excerpt) | Swaps (excerpt) | Extra flags |
+|------|---------------------|-----------------|-------------|
+| LLVM compiler | `/EHsc`, `permissive-`, `bigobj`, `EGR`, `W3`, several `-Wno-*` | `/MD{,d}`→`-fms-extensions`, `/Zi`→`-g`, `/O1`–`/O4`→`-O1`–`-O4` | `-D_USE_MATH_DEFINES`, `-D_CRT_SECURE_NO_WARNINGS`, `-w` |
+| LLVM linker | `/INCREMENTAL:NO` | `/LTCG`→`-flto`, `/MANIFEST:EMBED{,ID=2}`→`/MANIFEST:NO` | `/MANIFEST:NO` |
+| MSVC compiler | `bigobj`, `GR`, `Od`, `W3`, several `-Wno-*` | `/Zi`→`/Z7` | `-D_USE_MATH_DEFINES` `-D_CRT_SECURE_NO_WARNINGS` `-FS` `-w` |
+| MSVC linker | `/INCREMENTAL:NO` | `/LTCG`→`-flto`, `/MANIFEST:EMBED{,ID=2}`→`/MANIFEST:NO` | *(none)* |
+| GCC compiler | `/Werror`, `ffast-math`, `fstrict-aliasing`, `fpack-struct`, `fshort-enum` | `/Zi`→`-g` | `-w` |
+| GCC linker | `/Werror` | `/LTCG`→`-flto` | *(none)* |
 
 ### Logging (`RUST_LOG`)
 
