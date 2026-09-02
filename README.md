@@ -76,10 +76,7 @@ compile time** from environment variables, so they must be set when building:
 > expanded when the crate is compiled, not at runtime. They form the search
 > order used later when locating executables.
 
-<<<<<<< HEAD
-=======
 ---
->>>>>>> ddc5ab1 (Added file logging via WRAPPER_LOG_FILE that respects RUST_LOG log level. Updated unit tests and README.md.)
 ## Runtime behavior
 
 Print the full usage/help banner (also lists every runtime variable):

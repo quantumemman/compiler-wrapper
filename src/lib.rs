@@ -99,9 +99,9 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -fms-extensions -w -Wno-everything";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "/MANIFEST:NO";
-pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -w -W0";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -FS -fms-extensions -w -W0";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
 pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
 pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
@@ -234,8 +234,8 @@ pub fn get_target_classification(executable_name: &String) -> (ExecutableFamily,
 /////////////////////////////////////////////////////////////////////////////////////////
 //                            Get the Arguments Filter Pack                            //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub fn get_args_filter_pack(family: &(ExecutableFamily, ExecutableKind)) -> (Regex, Vec<(Regex, String)>, &str) {
-    match family {
+pub fn get_args_filter_pack(classification: &(ExecutableFamily, ExecutableKind)) -> (Regex, Vec<(Regex, String)>, &str) {
+    match classification {
         (ExecutableFamily::LLVM, ExecutableKind::COMPILER) => (LLVM_COMPILER_BAD_FLAGS.clone(), LLVM_COMPILER_SWAP_PAIRS.clone(), LLVM_COMPILER_EXTRA_FLAGS),
         (ExecutableFamily::MSVC, ExecutableKind::COMPILER) => (MSVC_COMPILER_BAD_FLAGS.clone(), MSVC_COMPILER_SWAP_PAIRS.clone(), MSVC_COMPILER_EXTRA_FLAGS),
         (ExecutableFamily::GCC, ExecutableKind::COMPILER) => (GCC_COMPILER_BAD_FLAGS.clone(), GCC_COMPILER_SWAP_PAIRS.clone(), GCC_COMPILER_EXTRA_FLAGS),
@@ -441,6 +441,8 @@ fn find_options_end(args: &[String]) -> usize {
         "-fprofile-generate", "-fprofile-use",
         // Coverage
         "-coverage",
+        // Dependency rule target/output (Clang/GCC)
+        "-MT", "-MF", "-MQ",
     ];
 
     while i < n {
@@ -470,6 +472,17 @@ fn find_options_end(args: &[String]) -> usize {
             }
         } else if arg.starts_with('-') || arg.starts_with('/') {
             // This is a standalone flag
+            // Defensive heuristic: if the next arg looks like a value (not a flag/source),
+            // warn that this might be an unrecognized flag+value pair.
+            if i + 1 < n {
+                let next = &args[i + 1];
+                if !next.starts_with('-') && !next.starts_with('/') && !is_source_arg(next) {
+                    warn!(
+                        "Possible unrecognized flag+value pair: {:?} {:?}. If {:?} takes a value, add it to FLAGS_WITH_VALUE.",
+                        arg, next, arg
+                    );
+                }
+            }
             i += 1;
         } else {
             // This is a positional argument (object file, library, etc.)
@@ -1467,6 +1480,65 @@ mod tests {
             &no_extra(),
         );
         assert_eq!(result, vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn mt_flag_value_not_split_by_extra_flags() {
+        // Regression test: -MT takes a value (the dependency rule target).
+        // Extra flags must be inserted AFTER the -MT value, not between -MT and its value.
+        // This was the bug that broke CMake's compiler detection in configure.log.
+        let extra = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything".to_string();
+        let result = apply_filter(
+            vec![
+                "-D_MBCS".to_string(),
+                "-O3".to_string(),
+                "-DNDEBUG".to_string(),
+                "-D_DLL".to_string(),
+                "-D_MT".to_string(),
+                "-Xclang".to_string(),
+                "--dependent-lib=msvcrt".to_string(),
+                "-MD".to_string(),
+                "-MT".to_string(),
+                "CMakeFiles/cmTC_412a9.dir/testCCompiler.c.obj".to_string(),
+                "-MF".to_string(),
+                "CMakeFiles\\cmTC_412a9.dir\\testCCompiler.c.obj.d".to_string(),
+                "-o".to_string(),
+                "CMakeFiles/cmTC_412a9.dir/testCCompiler.c.obj".to_string(),
+                "-c".to_string(),
+                "C:/Dev/Projects/TheRock/build/CMakeFiles/CMakeScratch/TryCompile-babef3/testCCompiler.c".to_string(),
+            ],
+            &default_cfg(),
+            &never_match(),
+            &no_swaps(),
+            &extra,
+        );
+        // The extra flags must appear BEFORE the source file (which is the end of options),
+        // not between -MT and its value, nor between -MF and its value.
+        assert_eq!(
+            result,
+            vec![
+                "-D_MBCS".to_string(),
+                "-O3".to_string(),
+                "-DNDEBUG".to_string(),
+                "-D_DLL".to_string(),
+                "-D_MT".to_string(),
+                "-Xclang".to_string(),
+                "--dependent-lib=msvcrt".to_string(),
+                "-MD".to_string(),
+                "-MT".to_string(),
+                "CMakeFiles/cmTC_412a9.dir/testCCompiler.c.obj".to_string(),
+                "-MF".to_string(),
+                "CMakeFiles\\cmTC_412a9.dir\\testCCompiler.c.obj.d".to_string(),
+                "-o".to_string(),
+                "CMakeFiles/cmTC_412a9.dir/testCCompiler.c.obj".to_string(),
+                "-c".to_string(),
+                "-D_USE_MATH_DEFINES".to_string(),
+                "-D_CRT_SECURE_NO_WARNINGS".to_string(),
+                "-w".to_string(),
+                "-Wno-everything".to_string(),
+                "C:/Dev/Projects/TheRock/build/CMakeFiles/CMakeScratch/TryCompile-babef3/testCCompiler.c".to_string(),
+            ]
+        );
     }
 
 // ---- skip-all ----------------------------------------------------------
