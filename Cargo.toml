@@ -1,12 +1,13 @@
 [package]
 name = "wrapper"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
 regex = "1.13.1"
 log = "0.4.34"
 env_logger = "0.11.11"
+zccache-depgraph = "1.9.0"
 
 [[bin]]
 name = "cl-rs"

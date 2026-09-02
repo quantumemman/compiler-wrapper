@@ -1,0 +1,143 @@
+use std::env;
+use std::sync::LazyLock;
+use regex::Regex;
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                         Define Executables Search Paths                             //
+/////////////////////////////////////////////////////////////////////////////////////////
+// Microsoft Visual C++ toolchain path
+pub const MSVC_PATH: &str = env!("MSVC_PATH_");
+// Visual Studio LLVM toolchain path
+pub const LLVM_PATH_VS: &str = env!("LLVM_PATH_VS_");
+// Custom LLVM toolchain path
+pub const LLVM_PATH: &str = env!("LLVM_PATH_");
+// GNU Compiler Collection path
+pub const GCC_PATH: &str = env!("GCC_PATH_");
+// Path to wrappers such as sccache and ccache
+pub const WRAPPER_PATH: &str = env!("PY_PATH_");
+
+/// Returns the ordered list of executable search paths.
+/// If `WRAPPER_PREFER_VS` is set, prefers Visual Studio's LLVM toolchain;
+/// otherwise prefers Custom LLVM.
+pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
+    if env::var("WRAPPER_PREFER_VS").is_ok() {
+        log::info!("Preferring Visual Studio LLVM toolchain");
+        [LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
+    } else {
+        log::debug!("Preferring Custom LLVM toolchain");
+        [LLVM_PATH, LLVM_PATH_VS, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
+    }
+});
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                            Define Executables Keywords                              //
+/////////////////////////////////////////////////////////////////////////////////////////
+// Keywords for detecting wrapper executables (e.g., ccache)
+pub static WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
+
+// Matches executable names that are wrappers from this project like clang-rs
+// to avoid doing their work for them since they will be called by this program
+pub static SELF_WRAPPER_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)[-]rs"#).unwrap());
+
+// Compiler executable keywords
+pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
+
+// Linker executable keywords
+pub static LINKER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(link|lld)"#).unwrap());
+
+// LLVM family keywords
+pub static LLVM_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|lld-link)"#).unwrap());
+
+// MSVC family keywords
+pub static MSVC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(cl|link)"#).unwrap());
+
+// GCC family keywords
+pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                Define Bad Flag Regexes                              //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/](permissive-|(D[-/])?bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
+pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/]((D[-/])?bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
+pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap()});
+pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
+pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
+pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror)"#).unwrap()});
+
+/// Common split flags (fused /Fd<dir> /Fo<dir> flags)
+pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Fd|Fo)"#).unwrap()});
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                            Swap pairs per classification                            //
+/////////////////////////////////////////////////////////////////////////////////////////
+
+pub static LLVM_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[-/]MD(d)?$").expect(BAD_MATCH_MESSAGE), "-fms-extensions".into()),
+        (Regex::new(r"^[-/]Zi$").expect(BAD_MATCH_MESSAGE), "-g".into()),
+        (Regex::new(r"^[-/]O1$").expect(BAD_MATCH_MESSAGE), "-O1".into()),
+        (Regex::new(r"^[-/]O2$").expect(BAD_MATCH_MESSAGE), "-O2".into()),
+        (Regex::new(r"^[-/]O3$").expect(BAD_MATCH_MESSAGE), "-O3".into()),
+        (Regex::new(r"^[-/]O4$").expect(BAD_MATCH_MESSAGE), "-O4".into()),
+    ]
+});
+
+pub static LLVM_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[-/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
+        (Regex::new(r"^[-/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[-/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
+    ]
+});
+
+pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[/]bigobj$").expect(BAD_MATCH_MESSAGE), "-bigobj".into()),
+        (Regex::new(r"^[-/]fms-extensions$").expect(BAD_MATCH_MESSAGE), "/MD".into()),
+        (Regex::new(r"^[-/]g$").expect(BAD_MATCH_MESSAGE), "/Zi".into()),
+    ]
+});
+
+pub static MSVC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[-/]flto$").expect(BAD_MATCH_MESSAGE), "/LTCG".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
+    ]
+});
+
+pub static GCC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+    ]
+});
+
+pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[-/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
+        (Regex::new(r"^[-/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[-/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
+    ]
+});
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                  Define Extra Flags                                 //
+/////////////////////////////////////////////////////////////////////////////////////////
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything";
+pub const LLVM_LINKER_EXTRA_FLAGS: &str = "";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -W0";
+pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
+pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
+pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                                 General Constants                                   //
+// //////////////////////////////////////////////////////////////////////////////////////
+/// Maximum CLI args char length before using response file
+pub const ARGS_CHAR_LIMIT: usize = 30000;
+/// Unknown keyword placeholder
+pub const UNKNOWN_KEYWORD: &str = "UNKNOWN";
+/// Bad match message for regex construction errors
+pub const BAD_MATCH_MESSAGE: &str = "bad match";
+/// Response file name pattern (uses process ID)
+pub const RESPONSE_FILE_NAME: &str = "@wrapper_<pid>.rsp";
