@@ -89,7 +89,7 @@ fn splits_fused_flag_and_directory() {
         "/Foanother\\target\\directory".to_string(),
         "main.cpp".to_string(),
     ];
-    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
+    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra(), ExecutableFamily::MSVC);
     assert_eq!(
         result,
         vec![
@@ -109,7 +109,7 @@ fn passes_through_standalone_flags() {
         "/Fo".to_string(),
         "main.cpp".to_string(),
     ];
-    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
+    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra(), ExecutableFamily::MSVC);
     assert_eq!(
         result,
         vec![
@@ -129,6 +129,7 @@ fn splits_case_insensitive_prefix() {
             &never_match(),
             &no_swaps(),
             &no_extra(),
+            ExecutableFamily::MSVC,
         ),
         vec!["/Fo".to_string(), "dist\\lib.obj".to_string()]
     );
@@ -150,6 +151,7 @@ fn drops_bad_flags() {
         &bad,
         &no_swaps(),
         &no_extra(),
+        ExecutableFamily::LLVM,
     );
     assert_eq!(result, vec!["-O2".to_string(), "a.c".to_string()]);
 }
@@ -168,6 +170,7 @@ fn drops_bad_flags_with_value() {
         &bad,
         &no_swaps(),
         &no_extra(),
+        ExecutableFamily::LLVM,
     );
     assert_eq!(result, vec!["-O2".to_string(), "a.c".to_string()]);
 }
@@ -190,6 +193,7 @@ fn swaps_stdlib_for_llvm() {
         &never_match(),
         &swap,
         &no_extra(),
+        ExecutableFamily::LLVM,
     );
     assert_eq!(
         result,
@@ -208,10 +212,11 @@ fn inserts_extra_flags_before_source() {
         &never_match(),
         &no_swaps(),
         &extra,
+        ExecutableFamily::LLVM,
     );
     assert_eq!(
         result,
-        vec!["-O2".to_string(), "-D_FOO".to_string(), "-D_BAR".to_string(), "a.c".to_string()]
+        vec!["-D_FOO".to_string(), "-D_BAR".to_string(), "-O2".to_string(), "a.c".to_string()]
     );
 }
 
@@ -232,6 +237,7 @@ fn inserts_extra_flags_after_value_flags() {
         &never_match(),
         &no_swaps(),
         &extra,
+        ExecutableFamily::LLVM,
     );
     assert_eq!(
         result,
@@ -240,9 +246,9 @@ fn inserts_extra_flags_after_value_flags() {
             "include".to_string(),
             "-L".to_string(),
             "lib".to_string(),
+            "-D_FOO".to_string(),
             "-l".to_string(),
             "m".to_string(),
-            "-D_FOO".to_string(),
             "a.c".to_string(),
         ]
     );
@@ -258,8 +264,9 @@ fn bare_value_flag_at_end_gets_extra_after() {
         &never_match(),
         &no_swaps(),
         &extra,
+        ExecutableFamily::LLVM,
     );
-    assert_eq!(result, vec!["-x".to_string(), "FLAG1".to_string()]);
+    assert_eq!(result, vec!["FLAG1".to_string(), "-x".to_string()]);
 }
 
 #[test]
@@ -270,6 +277,7 @@ fn empty_extra_flags_do_nothing() {
         &never_match(),
         &no_swaps(),
         &no_extra(),
+        ExecutableFamily::LLVM,
     );
     assert_eq!(result, vec!["-x".to_string(), "a.c".to_string(), "b".to_string()]);
 }
@@ -303,8 +311,9 @@ fn mt_flag_value_not_split_by_extra_flags() {
         &never_match(),
         &no_swaps(),
         &extra,
+        ExecutableFamily::LLVM,
     );
-    // The extra flags must appear BEFORE the source file (which is the end of options),
+    // The extra flags must appear immediately BEFORE the last flag (-c),
     // not between -MT and its value, nor between -MF and its value.
     assert_eq!(
         result,
@@ -323,11 +332,11 @@ fn mt_flag_value_not_split_by_extra_flags() {
             "CMakeFiles\\cmTC_412a9.dir\\testCCompiler.c.obj.d".to_string(),
             "-o".to_string(),
             "CMakeFiles/cmTC_412a9.dir/testCCompiler.c.obj".to_string(),
-            "-c".to_string(),
             "-D_USE_MATH_DEFINES".to_string(),
             "-D_CRT_SECURE_NO_WARNINGS".to_string(),
             "-w".to_string(),
             "-Wno-everything".to_string(),
+            "-c".to_string(),
             "C:/Dev/Projects/TheRock/build/CMakeFiles/CMakeScratch/TryCompile-babef3/testCCompiler.c".to_string(),
         ]
     );
@@ -346,13 +355,14 @@ fn inserts_extra_flags_before_object_file() {
         &never_match(),
         &no_swaps(),
         &extra,
+        ExecutableFamily::LLVM,
     );
     assert_eq!(
         result,
         vec![
+            "-D_FOO".to_string(),
             "-I".to_string(),
             "include".to_string(),
-            "-D_FOO".to_string(),
             "a.o".to_string(),
         ]
     );
@@ -365,7 +375,7 @@ fn passes_clang_prefixed_and_splits_fd() {
         "-clang:/FoCMakeLists\\my\\sussy.dir\\".to_string(),
         "/Fdsome\\suspicious\\dirname".to_string(),
     ];
-    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra());
+    let result = apply_filter(input_args, &default_cfg(), &never_match(), &no_swaps(), &no_extra(), ExecutableFamily::LLVM);
     assert_eq!(
         result,
         vec![
@@ -385,6 +395,7 @@ fn splits_dash_prefixed_fo_flag() {
         &never_match(),
         &no_swaps(),
         &no_extra(),
+        ExecutableFamily::MSVC,
     );
     assert_eq!(
         result,

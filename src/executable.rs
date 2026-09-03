@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
-use crate::constants::{PATHS, UNKNOWN_KEYWORD, WRAPPER_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS, SELF_WRAPPER_SIGNATURE};
 use log::{debug, trace};
+use crate::constants::{PATHS, UNKNOWN_KEYWORD, EXTERNAL_WRAPPER_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS, PROJECT_SIGNATURE};
 
 /// Split the source executable name into (wrapper, tool) pair.
 /// For combined forms like "sccache-clang-cl", this returns ("sccache", "clang-cl").
@@ -10,7 +10,7 @@ pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String
     let mut wrapper_name = UNKNOWN_KEYWORD.to_string();
     let mut executable_name = wrapper_name.clone();
 
-    if WRAPPER_KEYWORDS.is_match(src_executable) {
+    if EXTERNAL_WRAPPER_KEYWORDS.is_match(src_executable) {
         if COMPILER_KEYWORDS.is_match(src_executable) || LINKER_KEYWORDS.is_match(src_executable) {
             // Combined form: "<wrapper>-<tool>", e.g. "sccache-clang-cl"
             if let Some((wrapper, tool)) = src_executable.split_once('-') {
@@ -31,7 +31,7 @@ pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String
 /// Find an executable in the given search paths.
 fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
     if executable_name != UNKNOWN_KEYWORD {
-        if !(SELF_WRAPPER_SIGNATURE.is_match(&executable_name) || Path::new(executable_name).is_absolute()) {
+        if !(PROJECT_SIGNATURE.is_match(&executable_name) || Path::new(executable_name).is_absolute()) {
             for dir in paths {
                 let candidate = Path::new(dir).join(executable_name);
                 let candidate = if cfg!(windows) {
