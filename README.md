@@ -1,8 +1,7 @@
 # WRAPPER — Compiler Argument Wrapper Helper
 
-A dependency-light Rust wrapper for C/C++ toolchain executables (Clang/LLVM,
-MSVC, GCC, GNU `ld`) and their `sccache` variants, geared toward Windows. Each
-wrapper:
+A Rust wrapper for C/C++ toolchain executables (Clang/LLVM, MSVC, GCC, GNU
+`ld`) and their `sccache` variants, geared toward Windows. Each wrapper:
 
 1. **Locates** the real underlying toolchain executable from a list of install
    paths baked in at compile time.
@@ -25,8 +24,8 @@ wrapper/
 ├── Cargo.toml        # crate manifest; defines every [[bin]] wrapper
 ├── src/
 │   ├── lib.rs        # all shared logic (path lookup, classification, filtering)
+│   ├── constants.rs  # user-editable flag tables and search paths
 │   └── *.rs          # one near-identical main per wrapper binary
-├── bin/              # (optional) deployed/copied wrapper executables
 └── target/           # cargo build output (git-ignored)
 ```
 
@@ -44,6 +43,7 @@ wrapper/
 | `lld-link-rs`            | LLVM `lld-link` |
 | `ld-rs`                  | GNU `ld` |
 | `sccache-rs`             | `sccache` (pass-through driver) |
+| `sccache-cl-rs`          | `sccache` + MSVC `cl` |
 | `sccache-clang-rs`, `sccache-clangpp-rs`, `sccache-clang-cl-rs` | `sccache` + Clang family |
 | `sccache-gcc-rs`, `sccache-gpp-rs` | `sccache` + GCC/G++ |
 
@@ -70,7 +70,7 @@ compile time** from environment variables, so they must be set when building:
 | `LLVM_PATH_VS_` | Visual Studio’s bundled LLVM (Clang at `LLVM/../../VC/Tools/Llvm`) |
 | `LLVM_PATH_`    | Custom LLVM install root |
 | `GCC_PATH_`     | GCC install root |
-| `PY_PATH_`      | Python venv `Scripts` directory |
+| `PY_PATH_`      | Directory containing wrapper tools like `sccache` |
 
 > These trailing-underscore names are read via the `env!()` macro, i.e. they are
 > expanded when the crate is compiled, not at runtime. They form the search
@@ -120,8 +120,8 @@ let status = Command::new(&runtime.main_exe)
 
 ### Argument pipeline
 
-Unless a step is disabled (or `WRAPPER_ENABLE_PASSTHROUGH` is set), each wrapper
-rewrites the argument list through these stages:
+Each wrapper rewrites the argument list through these stages (any step can be
+disabled via its corresponding env var):
 
 1. **Split** fused `/Fd<dir>` / `/Fo<dir>` flags into the bare flag plus the
    directory value (the original `/` or `-` prefix is preserved). A bare flag
@@ -131,9 +131,9 @@ rewrites the argument list through these stages:
    set (e.g. MSVC-specific `-Wno-*` warning suppressions that clang would choke
    on, or `/INCREMENTAL:NO` on linkers).
 3. **Swap problematic flags** — replace a flag with a portable equivalent
-   (`/MD` / `/MDd` → `-fms-extensions`, `/Zi` → `-g` on LLVM/GCC or `/Z7` on
-   MSVC, `/LTCG` → `-flto`, `/O1`–`/O4` → `-O1`–`-O4`). A pair whose replacement
-   is empty removes the argument.
+   (`/MD` / `/MDd` → `-fms-extensions`, `/Zi` → `-g` on LLVM/GCC, `/LTCG` →
+   `-flto`, `/O1`–`/O4` → `-O1`–`-O4`). A pair whose replacement is empty
+   removes the argument.
 4. **Add helpful flags** — splice compiler/toolchain extras (e.g.
    `-D_USE_MATH_DEFINES`, warning suppressions, `/MANIFEST:NO`) into the
    *options* region of the command without ever splitting a flag/value pair.
@@ -143,15 +143,16 @@ rewrites the argument list through these stages:
    - before the first source file,
    - only at the end for a clear compile step; a pure link (objects + `-o`) is
      left untouched so compiler-only flags never leak into a link.
-   Already-present tokens are deduplicated.
-5. **Version fallback** — if the argument list ends up empty, a lone `--version`
-   is appended so the tool still prints something useful. This is mutually
-   exclusive with step 4 / any response-file content.
-6. **Response files** — if any argument already starts with `@`, the list is
+5. **Response files** — if any argument already starts with `@`, the list is
    passed through untouched. Otherwise, when the joined arguments exceed
    `WRAPPER_ARGS_CHAR_LIMIT` (default `30000`) or `WRAPPER_FORCE_RESPONSE_FILES`
    is set, the arguments are written to an absolute `@<pid>.rsp` file in the
    system temp directory and the list collapses to a single `@file` argument.
+
+All flag tables (bad / swap / extra) are user-editable in `src/constants.rs`.
+The `zccache-depgraph` crate handles all flag parsing (determining which flags
+take a separate value, where options end, etc.), so there are no hardcoded flag
+lists in the wrapper itself.
 
 ### Classification
 
@@ -209,10 +210,8 @@ clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 | `WRAPPER_SKIP_SWAP_FLAGS` | Skip swapping problematic flags. |
 | `WRAPPER_SKIP_ADD_FLAGS` | Skip adding extra helpful flags. |
 | `WRAPPER_SKIP_ALL_FLAGS` | Disable the split / remove-bad / swap / add steps at once. |
-| `WRAPPER_SKIP_VERSION_ON_EMPTY` | Skip auto-adding `--version` when no arguments remain. |
 | `WRAPPER_ARGS_CHAR_LIMIT` | Override the response-file threshold (default `30000`). |
 | `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
-| `WRAPPER_ENABLE_PASSTHROUGH` | Bypass all processing and pass arguments through unchanged. |
 | `WRAPPER_OPTIONS` / `WRAPPER_HELP` | Print the help banner and exit. |
 | `RUST_LOG` | Set `DualLogger` diagnostic verbosity (`error` default, up to `trace`). |
 | `WRAPPER_LOG_FILE` | Path to a file for dual logging — log messages are written here in addition to stdout. Same level as `RUST_LOG`. |
@@ -232,9 +231,7 @@ cargo test --lib    # targeted: only the src/lib.rs suite
 
 The tests cover splitting of fused flags (slash- and dash-prefixed, mixed,
 bare-passthrough), bad-flag removal, swap behavior, the `skip_*` combinations,
-extra-flag splicing (placement rules, duplicate suppression, link-step
-guard), response-file emission (content, special characters, existing `@` arg),
-and the empty-argument `--version` fallback.
+and extra-flag splicing (placement rules for value flags and source files).
 
 ---
 
@@ -244,8 +241,11 @@ and the empty-argument `--version` fallback.
   (`sccache-clang …`) or, for the bare `sccache` wrapper, from the first
   argument, and let `sccache` drive the actual tool.
 * All raw flag tables (bad / swap / extra) are declared once per family/kind in
-  `lib.rs`; classification is done by keywords on the deputy executable's name,
-  so unrecognised tools default to `UNKNOWN` (no filter pack, and the `UNKNOWN`
-  combination panics in `get_args_filter_pack`).
+  `src/constants.rs`; classification is done by keywords on the deputy
+  executable's name, so unrecognised tools default to `UNKNOWN` (no filter
+  pack, and the `UNKNOWN` combination panics in `get_args_filter_pack`).
+* Flag parsing (which flags take a value, where options end, etc.) is delegated
+  to the `zccache-depgraph` crate — there are no hardcoded flag lists in the
+  wrapper itself.
 * Output found when searching the baked-in paths is reported at `info` level;
   enable `RUST_LOG=debug`/`trace` to see the full rewritten argument list.

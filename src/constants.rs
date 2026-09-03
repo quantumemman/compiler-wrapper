@@ -30,14 +30,10 @@ pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////
-//                            Define Executables Keywords                              //
+//                     Define Wrapper/Compiler/Linker Keywords                         //
 /////////////////////////////////////////////////////////////////////////////////////////
 // Keywords for detecting wrapper executables (e.g., ccache)
-pub static WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
-
-// Matches executable names that are wrappers from this project like clang-rs
-// to avoid doing their work for them since they will be called by this program
-pub static SELF_WRAPPER_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)[-]rs"#).unwrap());
+pub static EXTERNAL_WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
 
 // Compiler executable keywords
 pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
@@ -54,6 +50,10 @@ pub static MSVC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(
 // GCC family keywords
 pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
 
+// Matches executable names that are wrappers from this project like clang-rs
+// to avoid doing their work for them since they will be called by this program
+pub static PROJECT_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)[-]rs"#).unwrap());
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -64,7 +64,9 @@ pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new
 pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
 pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror)"#).unwrap()});
 
-/// Common split flags (fused /Fd<dir> /Fo<dir> flags)
+/// Flags whose value may be fused to the prefix (e.g. `/Fdsome\dir`,
+/// `/Foout.obj`). When the split-flags feature is enabled, these get split into
+/// two tokens: the prefix and the value. The user controls which flags match.
 pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Fd|Fo)"#).unwrap()});
 
 /////////////////////////////////////////////////////////////////////////////////////////
