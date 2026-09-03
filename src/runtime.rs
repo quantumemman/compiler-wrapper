@@ -1,9 +1,9 @@
 use std::path::Path;
 use log::{debug, info, trace, warn};
-use crate::constants::{UNKNOWN_KEYWORD, SELF_WRAPPER_SIGNATURE};
+use crate::filter::filter_args;
+use crate::constants::{UNKNOWN_KEYWORD, PROJECT_SIGNATURE};
 use crate::executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
-use crate::filter::filter_args;
 
 /// Holds runtime information for the wrapper.
 pub struct Runtime {
@@ -51,13 +51,14 @@ impl Runtime {
         let (bad_flags, swap_pairs, extra_flags) =
             get_args_filter_pack(target_classification);
 
-        if !SELF_WRAPPER_SIGNATURE.is_match(&deputy_exe) {
+        if !PROJECT_SIGNATURE.is_match(&deputy_exe) {
             final_args = filter_args(
                 input_args.clone(),
                 &bad_flags,
                 &swap_pairs,
                 &extra_flags.to_string(),
                 &crate::filter::FilterConfig::from_env(),
+                target_classification.0,
             );
         } else {
             final_args = input_args.clone()

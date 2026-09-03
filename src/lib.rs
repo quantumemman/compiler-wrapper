@@ -1,16 +1,20 @@
 // Module declarations
 mod constants;
-mod flags;
+mod executable;
 mod classification;
 mod filter;
+mod parser;
 mod runtime;
 mod logger;
 mod usage;
-mod executable;
 
 // Re-export public API
 pub use classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
-pub use filter::{FilterConfig, filter_args, apply_filter, find_options_end, is_pure_link_step};
+pub use filter::{FilterConfig, filter_args, apply_filter};
+pub use parser::{
+    parse_args, locate_last_flag, find_options_end, flag_takes_separate_value,
+    embedded_flag_value, is_source_arg, LocatedFlag,
+};
 pub use runtime::Runtime;
 pub use logger::init_logger;
 pub use usage::print_usage;
@@ -19,10 +23,10 @@ pub use executable::{get_executable_names, get_executable_paths, get_main_and_de
 // Re-export constants
 pub use constants::{
     LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH,
-    PATHS, WRAPPER_KEYWORDS, SELF_WRAPPER_SIGNATURE,
-    COMPILER_KEYWORDS, LINKER_KEYWORDS,
-    LLVM_KEYWORDS, MSVC_KEYWORDS, GCC_KEYWORDS,
-    ARGS_CHAR_LIMIT, UNKNOWN_KEYWORD, BAD_MATCH_MESSAGE, RESPONSE_FILE_NAME,
+    PATHS, EXTERNAL_WRAPPER_KEYWORDS, PROJECT_SIGNATURE,
+    ARGS_CHAR_LIMIT, BAD_MATCH_MESSAGE, RESPONSE_FILE_NAME,
+    COMPILER_KEYWORDS, LINKER_KEYWORDS, UNKNOWN_KEYWORD,
+    LLVM_KEYWORDS, MSVC_KEYWORDS, GCC_KEYWORDS, COMMON_SPLIT_FLAGS,
     LLVM_COMPILER_EXTRA_FLAGS, LLVM_LINKER_EXTRA_FLAGS,
     MSVC_COMPILER_EXTRA_FLAGS, MSVC_LINKER_EXTRA_FLAGS,
     GCC_COMPILER_EXTRA_FLAGS, GCC_LINKER_EXTRA_FLAGS,
@@ -32,7 +36,6 @@ pub use constants::{
     LLVM_COMPILER_BAD_FLAGS, LLVM_LINKER_BAD_FLAGS,
     MSVC_COMPILER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS,
     GCC_COMPILER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS,
-    COMMON_SPLIT_FLAGS,
 };
 
 #[cfg(test)]

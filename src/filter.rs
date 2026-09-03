@@ -1,9 +1,12 @@
-use log::{trace, warn};
+use log::trace;
 use regex::Regex;
-use crate::classification::ExecutableFamily;
-use crate::constants::ARGS_CHAR_LIMIT;
-use crate::flags::flags_with_value;
 use std::env;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
+use crate::parser::{find_options_end, locate_last_flag};
+use crate::classification::ExecutableFamily;
+use crate::constants::{ARGS_CHAR_LIMIT, RESPONSE_FILE_NAME, COMMON_SPLIT_FLAGS};
 
 /// Configuration controlling which filtering steps run. Derived from env vars
 /// in `filter_args`; kept as data so the pure logic in `apply_filter` is unit-testable
@@ -57,6 +60,7 @@ pub fn apply_filter(
     bad_flags: &Regex,
     swap_pairs: &[(Regex, String)],
     extra_flags: &str,
+    family: ExecutableFamily,
 ) -> Vec<String> {
     // Step 1: Split combined flags
     let mut split_args = if config.skip_split {
@@ -97,24 +101,27 @@ pub fn apply_filter(
     if !config.skip_add && !extra_flags.is_empty() {
         let extra: Vec<String> = extra_flags.split_whitespace().map(|s| s.to_string()).collect();
         if !extra.is_empty() {
-            // Determine the family from the first arg (if it's a flag)
-            let family = ExecutableFamily::LLVM; // Default, will be overridden by caller
             insert_extra_flags(&mut split_args, &extra, family);
         }
     }
+    trace!("After extra flags: {:?}", split_args);
+
+    // Step 5: Response file emission
+    split_args = maybe_emit_response_file(split_args, config);
 
     split_args
 }
 
-/// Split combined flags into individual flags.
+/// Split fused flags into individual flags using [`COMMON_SPLIT_FLAGS`].
+/// For example, `/Fdsome\\target\\directory` becomes `["/Fd", "some\\target\\directory"]`.
 fn split_flags(args: Vec<String>) -> Vec<String> {
     let mut result = Vec::new();
     for arg in args {
         if arg.starts_with('-') || arg.starts_with('/') {
-            if is_single_flag(&arg) {
-                result.push(arg);
+            if let Some(split) = split_combined_flag(&arg) {
+                result.extend(split);
             } else {
-                result.extend(split_combined_flags(&arg));
+                result.push(arg);
             }
         } else {
             result.push(arg);
@@ -123,51 +130,16 @@ fn split_flags(args: Vec<String>) -> Vec<String> {
     result
 }
 
-/// Check if a flag is a single, indivisible flag.
-fn is_single_flag(arg: &str) -> bool {
-    let single_flags = [
-        "-O0", "-O1", "-O2", "-O3", "-Os", "-Oz", "-Ofast",
-        "-Wall", "-Wextra", "-Werror", "-Wpedantic",
-        "-std=c89", "-std=c99", "-std=c11", "-std=c17", "-std=c23",
-        "-std=c++11", "-std=c++14", "-std=c++17", "-std=c++20", "-std=c++23",
-        "-std=gnu++11", "-std=gnu++14", "-std=gnu++17", "-std=gnu++20", "-std=gnu++23",
-        "-MD", "-MT", "-MF", "-MQ",
-        "-c", "-S", "-E",
-        "-shared", "-static", "-fPIC",
-        "-g", "-g0", "-g1", "-g2", "-g3",
-        "-v", "-###", "-help", "--help",
-    ];
-    single_flags.contains(&arg)
-}
-
-/// Split a combined flag into individual flags.
-/// For example, `/Fdsome\\target\\directory` becomes `["/Fd", "some\\target\\directory"]`.
-fn split_combined_flags(arg: &str) -> Vec<String> {
-    // Known flag prefixes that can be combined with their values.
-    // Note: -D and /D are NOT included because the define name is always attached
-    // to the prefix (e.g., -D_MBCS is a single flag, not -D + _MBCS).
-    let prefixes = [
-        "/Fd", "/Fo", "/Fp", "/Fe", "/Fa", "/Fm", "/FR", "/FU",
-        "-Fd", "-Fo", "-Fp", "-Fe", "-Fa", "-Fm", "-FR", "-FU",
-        "/I", "/L", "/l",
-        "-I", "-L", "-l",
-    ];
-
-    for prefix in &prefixes {
-        if arg.starts_with(prefix) && arg.len() > prefix.len() {
-            let value = &arg[prefix.len()..];
-            return vec![prefix.to_string(), value.to_string()];
-        }
+/// Split a fused flag into its prefix and value using [`COMMON_SPLIT_FLAGS`].
+/// Returns `None` if the flag does not match any known prefix.
+fn split_combined_flag(arg: &str) -> Option<Vec<String>> {
+    let caps = COMMON_SPLIT_FLAGS.captures(arg)?;
+    let prefix = caps.get(0)?.as_str();
+    if prefix.len() < arg.len() {
+        let value = &arg[prefix.len()..];
+        return Some(vec![prefix.to_string(), value.to_string()]);
     }
-
-    // No known prefix found, return as-is
-    vec![arg.to_string()]
-}
-
-/// Check if an argument is a source file.
-fn is_source_arg(arg: &str) -> bool {
-    let source_extensions = [".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hpp", ".hxx", ".s", ".S", ".asm"];
-    source_extensions.iter().any(|ext| arg.ends_with(ext))
+    None
 }
 
 /// Insert extra flags at the appropriate position in the argument list.
@@ -178,57 +150,78 @@ fn splice_at(args: &mut Vec<String>, pos: usize, insert: &[String]) {
 }
 
 fn insert_extra_flags(args: &mut Vec<String>, extra: &[String], family: ExecutableFamily) {
-    let pos = find_options_end(args, family);
+    // Use locate_last_flag (scanning from the end) to find the last flag, then
+    // insert the extra flags immediately before it. This keeps the injected
+    // flags inside the options region (before any `--` marker or source file)
+    // while ensuring the user's last flag stays at the end of options — e.g.
+    // `gcc -c main.c` becomes `gcc EXTRA -c main.c`, not `gcc -c EXTRA main.c`.
+    // Falls back to find_options_end (scanning from the front) only when the
+    // command has no flags at all.
+    let pos = locate_last_flag(args, family)
+        .map(|located| located.flag_index)
+        .unwrap_or_else(|| find_options_end(args, family));
     splice_at(args, pos, extra);
 }
 
-/// Find the index where options end and positional arguments begin.
-pub fn find_options_end(args: &[String], family: ExecutableFamily) -> usize {
-    let flag_values = flags_with_value(family);
-    let n = args.len();
-    let mut i = 0;
-
-    while i < n {
-        let arg = &args[i];
-        let takes_value = flag_values.iter().any(|f| arg == f);
-
-        if takes_value {
-            if i + 1 < n {
-                i += 2;
-            } else {
-                i += 1;
-            }
-        } else if arg.starts_with('-') || arg.starts_with('/') {
-            // Defensive heuristic: warn about possible unrecognized flag+value pairs
-            if i + 1 < n {
-                let next = &args[i + 1];
-                if !next.starts_with('-') && !next.starts_with('/') && !is_source_arg(next) {
-                    warn!(
-                        "Possible unrecognized flag+value pair: {:?} {:?}. If {:?} takes a value, add it to FLAGS_WITH_VALUE.",
-                        arg, next, arg
-                    );
-                }
-            }
-            i += 1;
-        } else {
-            break;
-        }
+/// If the joined arguments exceed the configured limit (or force_response_files
+/// is set), write them to a response file in the temp directory and collapse
+/// the argument list to a single `@file` argument. If any argument already
+/// starts with `@`, the list is passed through untouched.
+fn maybe_emit_response_file(args: Vec<String>, config: &FilterConfig) -> Vec<String> {
+    // If any arg already starts with `@`, pass through untouched
+    if args.iter().any(|a| a.starts_with('@')) {
+        return args;
     }
 
-    i
-}
+    // Calculate total character length of joined arguments
+    let total_len: usize = args.iter().map(|a| a.len() + 1).sum::<usize>().saturating_sub(1);
 
-/// Check if the command is a pure link step (no source files).
-pub fn is_pure_link_step(args: &[String]) -> bool {
-    let has_object = args.iter().any(|a| {
-        let lower = a.to_lowercase();
-        lower.ends_with(".obj") || lower.ends_with(".o") || lower.ends_with(".lib") || lower.ends_with(".a")
-    });
-    let has_source = args.iter().any(|a| is_source_arg(a));
-    has_object && !has_source
+    // Determine if we need a response file:
+    // - force_response_files effectively sets the limit to 1 (need at least 1 non-compiler arg)
+    // - otherwise check against the configured char limit
+    let needs_response_file = if config.force_response_files {
+        args.len() > 1
+    } else {
+        total_len > config.args_char_limit
+    };
+
+    if !needs_response_file {
+        return args;
+    }
+
+    // Build the response file path in the system temp directory
+    let pid = std::process::id();
+    let rsp_name = RESPONSE_FILE_NAME.replace("<pid>", &pid.to_string());
+    let rsp_path: PathBuf = std::env::temp_dir().join(&rsp_name);
+
+    // Write each argument on its own line
+    if let Ok(mut file) = File::create(&rsp_path) {
+        for (i, arg) in args.iter().enumerate() {
+            if i > 0 {
+                let _ = writeln!(file);
+            }
+            let _ = write!(file, "{}", arg);
+        }
+        let _ = file.flush();
+        trace!("Wrote response file: {:?}", rsp_path);
+
+        // Collapse to a single `@file` argument
+        vec![format!("@{}", rsp_path.display())]
+    } else {
+        // If we can't create the response file, pass through untouched
+        trace!("Failed to create response file: {:?}", rsp_path);
+        args
+    }
 }
 
 /// Filter and transform command-line arguments for the target executable.
-pub fn filter_args(args: Vec<String>, bad_flags: &Regex, swap_pairs: &[(Regex, String)], extra_flags: &str, config: &FilterConfig) -> Vec<String> {
-    apply_filter(args, config, bad_flags, swap_pairs, extra_flags)
+pub fn filter_args(
+    args: Vec<String>,
+    bad_flags: &Regex,
+    swap_pairs: &[(Regex, String)],
+    extra_flags: &str,
+    config: &FilterConfig,
+    family: ExecutableFamily,
+) -> Vec<String> {
+    apply_filter(args, config, bad_flags, swap_pairs, extra_flags, family)
 }
