@@ -1,5 +1,13 @@
 use std::env;
 
+use crate::constants::{
+    CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,
+    CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG,
+};
+
+/// Package version from Cargo.toml
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// ANSI color codes for terminal output.
 pub mod ansi {
     pub const RESET: &str = "\x1b[0m";
@@ -124,13 +132,9 @@ fn section_row(title: &str, inner: usize) -> String {
     s
 }
 
-/// Prints the wrapper usage/help message when `WRAPPER_OPTIONS` or `WRAPPER_HELP` is set.
+/// Prints the wrapper usage/help message.
 /// Returns `true` if the help message was shown (so the caller can exit), `false` otherwise.
-pub fn print_usage() -> bool {
-    if !(env::var("WRAPPER_OPTIONS").is_ok() || env::var("WRAPPER_HELP").is_ok()) {
-        return false;
-    }
-
+pub fn print_usage(executable_name: String) -> bool {
     const INNER: usize = 90; // usable text columns between the two side borders
     const NAME_W: usize = 30; // reserved width for the variable-name column
     let rule = "═".repeat(INNER + 2);
@@ -141,7 +145,7 @@ pub fn print_usage() -> bool {
     lines.push(box_row("", INNER));
     lines.push(box_row(
         &center_text(
-            &paint("WRAPPER — Compiler Argument Wrapper Helper", &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+            &paint(format!("{} v{} — Compiler Argument Wrapper Helper", executable_name, VERSION).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
             INNER,
         ),
         INNER,
@@ -153,22 +157,22 @@ pub fn print_usage() -> bool {
     lines.push(box_row("", INNER));
 
     // ---- Flags & behaviour ----
-    lines.push(section_row("FLAGS & BEHAVIOUR", INNER));
+    lines.push(section_row("FLAGS & BEHAVIOR", INNER));
     lines.extend(usage_pair(
         "WRAPPER_PREFER_VS",
-        "Prefer VS Studio LLVM executables over ROCm LLVM.",
+        "Prefer VS Studio LLVM executables over Custom LLVM.",
         NAME_W,
         INNER,
     ));
     lines.extend(usage_pair(
         "WRAPPER_CLANG_CL_IS_LLVM",
-        "Route clang-cl down the LLVM family (the default). Declaring it explicitly makes the intent immune to default changes.",
+        "Treat clang-cl as LLVM family. All flag processing is done from the LLVM perspective.",
         NAME_W,
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_GCC_IS_LLVM",
-        "Route g++/gcc down the LLVM family. Declaring it explicitly makes the intent immune to default changes.",
+        "WRAPPER_CLANG_CL_IS_MSVC",
+        "Treat clang-cl as MSVC family (the default). All flag processing is done from the MSVC perspective.",
         NAME_W,
         INNER,
     ));
@@ -176,26 +180,14 @@ pub fn print_usage() -> bool {
     // ---- Runtime info ----
     lines.push(section_row("RUNTIME INFO", INNER));
     lines.extend(usage_pair(
-        "WRAPPER_OPTIONS",
-        "Print this help message and exit.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        "WRAPPER_HELP",
-        "Print this help message and exit.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
         "WRAPPER_LOG_LEVEL",
-        "Set the log level (trace, debug, info, warn, error). Default: info.",
+        "Set the log level (trace, debug, info, warn, error). Default: error.",
         NAME_W,
         INNER,
     ));
     lines.extend(usage_pair(
         "WRAPPER_LOG_FILE",
-        "Path to the log file. Default: <temp_dir>/wrapper_logs/wrapper_<pid>.log.",
+        format!("Path to log file e.g. /path/to/{}.log.", executable_name.trim_end_matches(".exe")).as_str(),
         NAME_W,
         INNER,
     ));
@@ -203,20 +195,50 @@ pub fn print_usage() -> bool {
     // ---- Filtering ----
     lines.push(section_row("FILTERING", INNER));
     lines.extend(usage_pair(
-        "WRAPPER_DISABLE_BAD_FLAGS",
-        "Disable bad flag filtering.",
+        "WRAPPER_SKIP_BAD_FLAGS",
+        "Skip bad flags removal step.",
         NAME_W,
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_DISABLE_SWAP_PAIRS",
-        "Disable flag swapping.",
+        "WRAPPER_SKIP_SWAP_FLAGS",
+        "Skip problematic flags swapping step.",
         NAME_W,
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_DISABLE_EXTRA_FLAGS",
-        "Disable extra flag insertion.",
+        "WRAPPER_SKIP_ADD_FLAGS",
+        "Skip extra flags insertion step.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- Passthrough ----
+    lines.push(section_row("PASSTHROUGH", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_ENABLE_PASSTHROUGH",
+        "Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- CLI Flags ----
+    lines.push(section_row("CLI FLAGS", INNER));
+    lines.extend(usage_pair(
+        &format!("{} / {}", CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG),
+        "Print this help message and exit.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        CLI_FLAG_USAGE,
+        "Print this help message and exit.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        &format!("{} / {}", CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG),
+        "Print version information and exit.",
         NAME_W,
         INNER,
     ));
@@ -239,4 +261,25 @@ pub fn print_usage() -> bool {
     println!("{bottom_border}");
 
     true
+}
+
+/// Checks if any of the CLI args are help/usage flags.
+/// If so, prints the usage message and returns `true`.
+pub fn check_help_flags(src_executable: &String, args: &[String]) -> bool {
+    let help_flags = [CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE];
+    if help_flags.contains(&args[0].as_str()) {
+        return print_usage(src_executable.to_string()); // Print usage if help flags are present and exit
+    }
+    false
+}
+
+/// Checks if any of the CLI args are version flags.
+/// If so, prints the version message and returns `true`.
+pub fn check_version_flags(src_executable: &String, args: &[String]) -> bool {
+    let version_flags = [CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG];
+    if version_flags.contains(&args[0].as_str()) {
+        println!("{} v{}", src_executable, VERSION);
+        return true;
+    }
+    false
 }

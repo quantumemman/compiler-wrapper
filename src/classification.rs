@@ -1,7 +1,10 @@
 use crate::constants::{LLVM_KEYWORDS, MSVC_KEYWORDS, GCC_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS};
-use crate::constants::{LLVM_COMPILER_BAD_FLAGS, MSVC_COMPILER_BAD_FLAGS, GCC_COMPILER_BAD_FLAGS, LLVM_LINKER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS};
-use crate::constants::{LLVM_COMPILER_SWAP_PAIRS, MSVC_COMPILER_SWAP_PAIRS, GCC_COMPILER_SWAP_PAIRS, LLVM_LINKER_SWAP_PAIRS, MSVC_LINKER_SWAP_PAIRS, GCC_LINKER_SWAP_PAIRS};
-use crate::constants::{LLVM_COMPILER_EXTRA_FLAGS, MSVC_COMPILER_EXTRA_FLAGS, GCC_COMPILER_EXTRA_FLAGS, LLVM_LINKER_EXTRA_FLAGS, MSVC_LINKER_EXTRA_FLAGS, GCC_LINKER_EXTRA_FLAGS};
+use crate::constants::{LLVM_COMPILER_BAD_FLAGS, MSVC_COMPILER_BAD_FLAGS, GCC_COMPILER_BAD_FLAGS};
+use crate::constants::{LLVM_LINKER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS};
+use crate::constants::{LLVM_COMPILER_SWAP_PAIRS, MSVC_COMPILER_SWAP_PAIRS, GCC_COMPILER_SWAP_PAIRS};
+use crate::constants::{LLVM_LINKER_SWAP_PAIRS, MSVC_LINKER_SWAP_PAIRS, GCC_LINKER_SWAP_PAIRS};
+use crate::constants::{LLVM_COMPILER_EXTRA_FLAGS, MSVC_COMPILER_EXTRA_FLAGS, GCC_COMPILER_EXTRA_FLAGS};
+use crate::constants::{LLVM_LINKER_EXTRA_FLAGS, MSVC_LINKER_EXTRA_FLAGS, GCC_LINKER_EXTRA_FLAGS};
 use regex::Regex;
 use std::env;
 
@@ -24,8 +27,8 @@ pub enum ExecutableKind {
 
 /// Classify a executable path into a (family, kind) tuple.
 pub fn get_target_classification(executable_name: &str) -> (ExecutableFamily, ExecutableKind) {
-    // treat clang-cl as MSVC only when explicitly requested AND LLVM is not requested
-    let family = if (env::var("WRAPPER_CLANG_CL_IS_MSVC").is_ok() && !env::var("WRAPPER_CLANG_CL_IS_LLVM").is_ok()) && executable_name.contains("clang-cl") {
+    // treat clang-cl as MSVC family unless requested then treat as LLVM
+    let family = if executable_name.contains("clang-cl") && !env::var("WRAPPER_CLANG_CL_IS_LLVM").is_ok() {
         ExecutableFamily::MSVC
     } else if LLVM_KEYWORDS.is_match(&executable_name) {
         ExecutableFamily::LLVM
