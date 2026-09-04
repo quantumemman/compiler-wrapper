@@ -1,6 +1,7 @@
+use std::env;
 use std::path::Path;
 use log::{debug, info, trace, warn};
-use crate::filter::filter_args;
+use crate::filter::{FilterConfig, filter_args};
 use crate::constants::{UNKNOWN_KEYWORD, PROJECT_SIGNATURE};
 use crate::executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
@@ -23,43 +24,31 @@ impl Runtime {
     /// Creates a new Runtime from the given arguments.
     pub fn new(src_file: String, mut input_args: Vec<String>) -> Self {
         let mut final_args: Vec<String>;
-        let src_executable = Path::new(&src_file)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string()
-            .replace(".rs", "");
+        let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().trim_end_matches(".rs").to_string();
         trace!("Src executable: {}", src_executable);
 
-        let target_executable_names: (String, String) =
-            get_executable_names(&src_executable, &mut input_args);
+        let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
         trace!("Target executable names: {:?}", target_executable_names);
 
-        let target_executable_paths: (String, String) =
-            get_executable_paths(&target_executable_names);
+        let target_executable_paths: (String, String) = get_executable_paths(&target_executable_names);
         trace!("Target executable paths: {:?}", target_executable_paths);
 
-        let (main_exe, deputy_exe): (String, String) =
-            get_main_and_deputy_executable_paths(&target_executable_paths);
+        let (main_exe, deputy_exe): (String, String) = get_main_and_deputy_executable_paths(&target_executable_paths);
         info!("Main exe: {}, Deputy exe: {}", main_exe, deputy_exe);
 
-        let target_classification: (ExecutableFamily, ExecutableKind) =
-            get_target_classification(&deputy_exe);
+        let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&deputy_exe);
         debug!("Target classification: {:?}", target_classification);
 
-        let (bad_flags, swap_pairs, extra_flags) =
-            get_args_filter_pack(target_classification);
+        // Check for passthrough mode - if enabled, skip all processing
+        let passthrough = env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok();
 
-        if !PROJECT_SIGNATURE.is_match(&deputy_exe) {
-            final_args = filter_args(
-                input_args.clone(),
-                &bad_flags,
-                &swap_pairs,
-                &extra_flags.to_string(),
-                &crate::filter::FilterConfig::from_env(),
-                target_classification.0,
-            );
+        if passthrough {
+            // Passthrough mode: pass args directly to target without any processing
+            final_args = input_args.clone();
+            info!("Passthrough mode enabled - skipping all argument processing");
+        } else if !PROJECT_SIGNATURE.is_match(&deputy_exe) {
+            let (bad_flags, swap_pairs, extra_flags) = get_args_filter_pack(target_classification);
+            final_args = filter_args(input_args.clone(), &bad_flags, &swap_pairs, &extra_flags.to_string(), &FilterConfig::from_env(), target_classification.0);
         } else {
             final_args = input_args.clone()
         }

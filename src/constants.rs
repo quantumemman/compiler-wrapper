@@ -57,8 +57,8 @@ pub static PROJECT_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                Define Bad Flag Regexes                              //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/](permissive-|(D[-/])?bigobj|EGR|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
-pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/]((D[-/])?bigobj|GR|Od|W3|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
+pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/](permissive-|(D[-/])?bigobj|EGR|W3|W4|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
+pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/]((D[-/])?bigobj|GR|Od|W3|W4|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
 pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap()});
 pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
 pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
@@ -143,3 +143,17 @@ pub const UNKNOWN_KEYWORD: &str = "UNKNOWN";
 pub const BAD_MATCH_MESSAGE: &str = "bad match";
 /// Response file name pattern (uses process ID)
 pub const RESPONSE_FILE_NAME: &str = "@wrapper_<pid>.rsp";
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//                              CLI Flag Constants                                     //
+/////////////////////////////////////////////////////////////////////////////////////////
+/// Short help flag
+pub const CLI_FLAG_HELP_SHORT: &str = "-h";
+/// Long help flag
+pub const CLI_FLAG_HELP_LONG: &str = "--help";
+/// Usage flag
+pub const CLI_FLAG_USAGE: &str = "--usage";
+/// Short version flag
+pub const CLI_FLAG_VERSION_SHORT: &str = "-v";
+/// Long version flag
+pub const CLI_FLAG_VERSION_LONG: &str = "--version";

@@ -17,7 +17,7 @@ pub use parser::{
 };
 pub use runtime::Runtime;
 pub use logger::init_logger;
-pub use usage::print_usage;
+pub use usage::{print_usage, check_help_flags, check_version_flags};
 pub use executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 
 // Re-export constants
@@ -36,6 +36,8 @@ pub use constants::{
     LLVM_COMPILER_BAD_FLAGS, LLVM_LINKER_BAD_FLAGS,
     MSVC_COMPILER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS,
     GCC_COMPILER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS,
+    CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,
+    CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG,
 };
 
 #[cfg(test)]

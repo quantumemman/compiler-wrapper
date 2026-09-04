@@ -79,16 +79,8 @@ compile time** from environment variables, so they must be set when building:
 ---
 ## Runtime behavior
 
-Print the full usage/help banner (also lists every runtime variable):
-
-```sh
-set WRAPPER_HELP=1    # PowerShell: $env:WRAPPER_HELP="1"
-clang-rs.exe          # prints the help box and exits
-```
-
-`WRAPPER_OPTIONS` has the same effect as `WRAPPER_HELP`.
-
-Each wrapper's `main` collects `env::args().skip(1)`, builds a `Runtime`, then
+Each wrapper's `main` collects `env::args().skip(1)`, checks for CLI flags
+(`-h`, `--help`, `--usage`, `-v`, `--version`), then builds a `Runtime` and
 runs the real tool:
 
 ```rust
@@ -212,7 +204,7 @@ clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 | `WRAPPER_SKIP_ALL_FLAGS` | Disable the split / remove-bad / swap / add steps at once. |
 | `WRAPPER_ARGS_CHAR_LIMIT` | Override the response-file threshold (default `30000`). |
 | `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
-| `WRAPPER_OPTIONS` / `WRAPPER_HELP` | Print the help banner and exit. |
+| `WRAPPER_ENABLE_PASSTHROUGH` | Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target. |
 | `RUST_LOG` | Set `DualLogger` diagnostic verbosity (`error` default, up to `trace`). |
 | `WRAPPER_LOG_FILE` | Path to a file for dual logging — log messages are written here in addition to stdout. Same level as `RUST_LOG`. |
 
