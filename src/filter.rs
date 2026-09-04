@@ -17,7 +17,6 @@ pub struct FilterConfig {
     pub skip_bad: bool,              // skip removing bad flags
     pub skip_swap: bool,             // skip swapping problematic flags
     pub skip_add: bool,              // skip appending extra helpful flags
-    pub skip_version_on_empty: bool, // skip auto-adding --version when args is empty
     pub force_response_files: bool,  // always use a response file (regardless of length)
     pub args_char_limit: usize,      // override for the argument character limit
 }
@@ -32,7 +31,6 @@ impl FilterConfig {
             skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
             skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
             skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
-            skip_version_on_empty: env::var("WRAPPER_SKIP_VERSION_ON_EMPTY").is_ok(),
             force_response_files: env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
             args_char_limit: FilterConfig::get_args_char_limit(),
         }
