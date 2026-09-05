@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use log::{debug, info, trace, warn};
 use crate::filter::{FilterConfig, filter_args};
-use crate::constants::{UNKNOWN_KEYWORD, PROJECT_SIGNATURE};
+use crate::constants::{UNKNOWN_KEYWORD};
 use crate::executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
 
@@ -39,18 +39,14 @@ impl Runtime {
         let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&deputy_exe);
         debug!("Target classification: {:?}", target_classification);
 
-        // Check for passthrough mode - if enabled, skip all processing
-        let passthrough = env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok();
-
-        if passthrough {
-            // Passthrough mode: pass args directly to target without any processing
+        // Check to see if passthrough mode is enabled to skip args processing
+        if env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() {
+            debug!("Passthrough mode enabled - skipping all argument processing");
             final_args = input_args.clone();
-            info!("Passthrough mode enabled - skipping all argument processing");
-        } else if !PROJECT_SIGNATURE.is_match(&deputy_exe) {
+        } else {
+            debug!("Passthrough mode not enabled - processing arguments");
             let (bad_flags, swap_pairs, extra_flags) = get_args_filter_pack(target_classification);
             final_args = filter_args(input_args.clone(), &bad_flags, &swap_pairs, &extra_flags.to_string(), &FilterConfig::from_env(), target_classification.0);
-        } else {
-            final_args = input_args.clone()
         }
 
         if target_executable_names.0 != UNKNOWN_KEYWORD {

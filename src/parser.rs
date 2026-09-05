@@ -1,24 +1,8 @@
-//! Family-aware command-line parsing for compiler/linker invocations.
-//!
-//! This layer sits on top of the [`zccache_depgraph`] parsers
-//! ([`zccache_depgraph::args::parse_gnu_args`] for GNU/Clang,
-//! [`zccache_depgraph::msvc_args::parse_msvc_args`] for MSVC) and adds what
-//! their parsed result does not expose directly:
-//!
-//! * which flag consumes the *next* token as its value,
-//! * where the options region ends (where extra flags get spliced in),
-//! * where the last flag lives.
-//!
-//! Knowing which flags consume a value is what lets extra flags be inserted
-//! without landing between a flag and its operand.
-
-use std::path::Path;
-
 use log::warn;
+use std::path::Path;
+use crate::classification::ExecutableFamily;
 use zccache_depgraph::args::{ParsedArgs, parse_gnu_args};
 use zccache_depgraph::msvc_args::parse_msvc_args;
-
-use crate::classification::ExecutableFamily;
 
 /// Probe token fed to a parser to see whether a flag swallows the next
 /// argument. Its value never matters, only whether it ends up as a
@@ -125,8 +109,9 @@ pub struct LocatedFlag {
     pub embedded_value: Option<String>,
 }
 
-/// Locate the last flag in a command line, family-aware.
-///
+/////////////////////////////////////////////////////////////////////////////////////////
+///               Locate the last flag in a command line, family-aware                 //
+/////////////////////////////////////////////////////////////////////////////////////////
 /// Scans from the end. The `--` end-of-options marker and everything after it
 /// are treated as positional, and a lone `-` (stdin/stdout) is not a flag.
 pub fn locate_last_flag(args: &[String], family: ExecutableFamily) -> Option<LocatedFlag> {
@@ -173,11 +158,9 @@ pub fn locate_last_flag(args: &[String], family: ExecutableFamily) -> Option<Loc
     None
 }
 
-/// Extract a value embedded in a flag token.
-///
-/// The [`zccache_depgraph`] parser is the authority: parse the single flag
-/// token and return whatever value the parser extracted from it. GNU/Clang
-/// `-flag=value` style is handled by the parser directly.
+/////////////////////////////////////////////////////////////////////////////////////////
+///                     Extract a value embedded in a flag token                       //
+/////////////////////////////////////////////////////////////////////////////////////////
 pub fn embedded_flag_value(flag: &str, family: ExecutableFamily) -> Option<String> {
     let parsed = parse_args(&[flag.to_string()], Path::new("."), family);
 
@@ -214,7 +197,9 @@ pub fn embedded_flag_value(flag: &str, family: ExecutableFamily) -> Option<Strin
     None
 }
 
-/// Check if an argument looks like a source file.
+/////////////////////////////////////////////////////////////////////////////////////////
+///                   Check if an argument looks like a source file                    //
+/////////////////////////////////////////////////////////////////////////////////////////
 pub fn is_source_arg(arg: &str) -> bool {
     let source_extensions = [
         ".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hpp", ".hxx", ".s", ".S", ".asm",

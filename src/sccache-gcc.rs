@@ -19,7 +19,8 @@ fn main() -> ExitCode {
     let runtime = Runtime::new(file!().to_string(), input_args);  // create a wrapper Runtime struct to hold the runtime info
     runtime.print_info();                                         // print wrapper runtime info according to RUST_LOG
 
-    // Run the target compiler/linker job and return the exit code
-    let command_status = Command::new(&runtime.main_exe).args(&runtime.final_args).status().expect(&runtime.expect); // sccache gcc + cleaned args
+    // Run the target compiler/linker job and return the exit code.
+    // Set WRAPPER_ENABLE_PASSTHROUGH=1 for the child process to avoid duplicate flag processing.
+    let command_status = Command::new(&runtime.main_exe).args(&runtime.final_args).env("WRAPPER_ENABLE_PASSTHROUGH","1").status().expect(&runtime.expect);
     ExitCode::from(command_status.code().unwrap_or(1).clamp(0, 255) as u8)
 }

@@ -1,3 +1,5 @@
+use std::env;
+use regex::Regex;
 use crate::constants::{LLVM_KEYWORDS, MSVC_KEYWORDS, GCC_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS};
 use crate::constants::{LLVM_COMPILER_BAD_FLAGS, MSVC_COMPILER_BAD_FLAGS, GCC_COMPILER_BAD_FLAGS};
 use crate::constants::{LLVM_LINKER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS};
@@ -5,8 +7,6 @@ use crate::constants::{LLVM_COMPILER_SWAP_PAIRS, MSVC_COMPILER_SWAP_PAIRS, GCC_C
 use crate::constants::{LLVM_LINKER_SWAP_PAIRS, MSVC_LINKER_SWAP_PAIRS, GCC_LINKER_SWAP_PAIRS};
 use crate::constants::{LLVM_COMPILER_EXTRA_FLAGS, MSVC_COMPILER_EXTRA_FLAGS, GCC_COMPILER_EXTRA_FLAGS};
 use crate::constants::{LLVM_LINKER_EXTRA_FLAGS, MSVC_LINKER_EXTRA_FLAGS, GCC_LINKER_EXTRA_FLAGS};
-use regex::Regex;
-use std::env;
 
 /// The compiler/linker family an executable belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
