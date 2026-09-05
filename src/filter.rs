@@ -70,19 +70,14 @@ pub fn apply_filter(
 
     // Step 2: Remove bad flags
     if !config.skip_bad {
-        split_args = split_args
-            .into_iter()
-            .filter(|a| !bad_flags.is_match(a))
-            .collect();
+        split_args = split_args.into_iter().filter(|a| !bad_flags.is_match(a)).collect();
         trace!("After bad flag removal: {:?}", split_args);
     }
 
     // Step 3: Swap flags
     if !config.skip_swap {
         for (regex, replacement) in swap_pairs {
-            split_args = split_args
-                .into_iter()
-                .map(|a| {
+            split_args = split_args.into_iter().map(|a| {
                     if regex.is_match(&a) {
                         trace!("Swapping flag: {} -> {}", a, replacement);
                         replacement.clone()

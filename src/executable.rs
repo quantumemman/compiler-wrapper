@@ -46,7 +46,7 @@ fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
                 }
             }
         } else {
-            debug!("Executable is absolute or another wrapper, returning as is: {}", executable_name);
+            debug!("Executable is absolute or another wrapper in this project, returning as is: {}", executable_name);
             return Some(PathBuf::from(executable_name));
         }
     }
