@@ -7,7 +7,7 @@ fn main() -> ExitCode {
     let _ = wrapper::init_logger();  // Initialize the dual logger (stdout + optional file)
     let src_executable = env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
     let input_args: Vec<String> = env::args().skip(1).collect();  // grab all args except the first one (this program's name)
-
+    
     if !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() {
         if check_help_flags(&src_executable, &input_args) {
             return ExitCode::SUCCESS;   // Print usage if help flags are present and exit
@@ -19,7 +19,8 @@ fn main() -> ExitCode {
     let runtime = Runtime::new(file!().to_string(), input_args);  // create a wrapper Runtime struct to hold the runtime info
     runtime.print_info();                                         // print wrapper runtime info according to RUST_LOG
 
-    // Run the target compiler/linker job and return the exit code
-    let command_status = Command::new(&runtime.main_exe).args(&runtime.final_args).status().expect(&runtime.expect); // lld-link + processed args
+    // Run the target compiler/linker job and return the exit code.
+    // Set WRAPPER_ENABLE_PASSTHROUGH=1 for the child process to avoid duplicate flag processing.
+    let command_status = Command::new(&runtime.main_exe).args(&runtime.final_args).env("WRAPPER_ENABLE_PASSTHROUGH","1").status().expect(&runtime.expect);
     ExitCode::from(command_status.code().unwrap_or(1).clamp(0, 255) as u8)
 }
