@@ -212,6 +212,18 @@ pub fn print_usage(executable_name: String) -> bool {
         NAME_W,
         INNER,
     ));
+    lines.extend(usage_pair(
+        "WRAPPER_SPLIT_FUSED_FLAGS",
+        "Enable splitting fused flag+value step.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_FIX_FLAG_PREFIXES",
+        "Enable fixing flag prefixes (e.g., /version:0.0 to -version:0.0).",
+        NAME_W,
+        INNER,
+    ));
 
     // ---- Passthrough ----
     lines.push(section_row("PASSTHROUGH", INNER));

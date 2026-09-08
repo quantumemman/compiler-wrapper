@@ -19,7 +19,7 @@ spawn the target tool with the processed arguments.
 
 ## Project layout
 
-```
+```text
 wrapper/
 ├── Cargo.toml        # crate manifest; defines every [[bin]] wrapper
 ├── src/
@@ -66,6 +66,7 @@ compile time** from environment variables, so they must be set when building:
 
 | Build-time variable | Purpose |
 |---------------------|---------|
+
 | `MSVC_PATH_`    | MSVC toolchain root |
 | `LLVM_PATH_VS_` | Visual Studio’s bundled LLVM (Clang at `LLVM/../../VC/Tools/Llvm`) |
 | `LLVM_PATH_`    | Custom LLVM install root |
@@ -77,6 +78,7 @@ compile time** from environment variables, so they must be set when building:
 > order used later when locating executables.
 
 ---
+
 ## Runtime behavior
 
 Each wrapper's `main` collects `env::args().skip(1)`, checks for CLI flags
@@ -118,15 +120,17 @@ disabled via its corresponding env var):
 1. **Split** fused `/Fd<dir>` / `/Fo<dir>` flags into the bare flag plus the
    directory value (the original `/` or `-` prefix is preserved). A bare flag
    with no value passes through unchanged. **This step is OFF by default** —
-   set `WRAPPER_SPLIT_FLAGS` to enable it.
-2. **Remove bad flags** — drop arguments matching the family/kind's bad-flag
+   set `WRAPPER_SPLIT_FUSED_FLAGS` to enable it.
+2. **Fix flag prefixes** — fix flag prefixes (e.g. `/version:0.0` to `-version:0.0`).
+   **This step is OFF by default** — set `WRAPPER_FIX_FLAG_PREFIXES` to enable it.
+3. **Remove bad flags** — drop arguments matching the family/kind's bad-flag
    set (e.g. MSVC-specific `-Wno-*` warning suppressions that clang would choke
    on, or `/INCREMENTAL:NO` on linkers).
-3. **Swap problematic flags** — replace a flag with a portable equivalent
+4. **Swap problematic flags** — replace a flag with a portable equivalent
    (`/MD` / `/MDd` → `-fms-extensions`, `/Zi` → `-g` on LLVM/GCC, `/LTCG` →
    `-flto`, `/O1`–`/O4` → `-O1`–`-O4`). A pair whose replacement is empty
    removes the argument.
-4. **Add helpful flags** — splice compiler/toolchain extras (e.g.
+5. **Add helpful flags** — splice compiler/toolchain extras (e.g.
    `-D_USE_MATH_DEFINES`, warning suppressions, `/MANIFEST:NO`) into the
    *options* region of the command without ever splitting a flag/value pair.
    Placement, in priority order:
@@ -135,7 +139,7 @@ disabled via its corresponding env var):
    - before the first source file,
    - only at the end for a clear compile step; a pure link (objects + `-o`) is
      left untouched so compiler-only flags never leak into a link.
-5. **Response files** — if any argument already starts with `@`, the list is
+6. **Response files** — if any argument already starts with `@`, the list is
    passed through untouched. Otherwise, when the joined arguments exceed
    `WRAPPER_ARGS_CHAR_LIMIT` (default `30000`) or `WRAPPER_FORCE_RESPONSE_FILES`
    is set, the arguments are written to an absolute `@<pid>.rsp` file in the
@@ -157,8 +161,10 @@ executable from its name:
   (`link|lld|ld`), else `UNKNOWN` / `WRAPPER` (`sccache`, `ccache`).
 
 Each (family, kind) pair maps to a filter pack:
+
 | Pack | Bad flags (excerpt) | Swaps (excerpt) | Extra flags |
 |------|---------------------|-----------------|-------------|
+
 | LLVM compiler | `/EHsc`, `permissive-`, `bigobj`, `EGR`, `W3`, several `-Wno-*` | `/MD{,d}`→`-fms-extensions`, `/Zi`→`-g`, `/O1`–`/O4`→`-O1`–`-O4` | `-D_USE_MATH_DEFINES`, `-D_CRT_SECURE_NO_WARNINGS`, `-w` |
 | LLVM linker | `/INCREMENTAL:NO` | `/LTCG`→`-flto`, `/MANIFEST:EMBED{,ID=2}`→`/MANIFEST:NO` | `/MANIFEST:NO` |
 | MSVC compiler | `bigobj`, `GR`, `Od`, `W3`, several `-Wno-*` | `/Zi`→`/Z7` | `-D_USE_MATH_DEFINES` `-D_CRT_SECURE_NO_WARNINGS` `-FS` `-w` |
@@ -197,21 +203,23 @@ clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 | `WRAPPER_PREFER_VS` | Prefer Visual Studio's LLVM executables over Custom LLVM when locating tools. |
 | `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family (the default). Declaring it explicitly makes the intent immune to default changes. |
 | `WRAPPER_CLANG_CL_IS_MSVC` | Force `clang-cl` to use the MSVC family instead of the default LLVM family. |
-| `WRAPPER_SPLIT_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
+| `WRAPPER_SPLIT_FUSED_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
+| `WRAPPER_FIX_FLAG_PREFIXES` | Fix flag prefixes (**off by default**; enable to turn the fix step on). |
 | `WRAPPER_SKIP_BAD_FLAGS` | Skip removing known-bad flags. |
 | `WRAPPER_SKIP_SWAP_FLAGS` | Skip swapping problematic flags. |
 | `WRAPPER_SKIP_ADD_FLAGS` | Skip adding extra helpful flags. |
-| `WRAPPER_SKIP_ALL_FLAGS` | Disable the split / remove-bad / swap / add steps at once. |
+| `WRAPPER_SKIP_ALL_FLAGS` | Disable opt-out options: remove-bad / swap / add steps at once; split / fix flag prefixes are opt-in and available. |
 | `WRAPPER_ARGS_CHAR_LIMIT` | Override the response-file threshold (default `30000`). |
 | `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
 | `WRAPPER_ENABLE_PASSTHROUGH` | Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target. |
 | `RUST_LOG` | Set `DualLogger` diagnostic verbosity (`error` default, up to `trace`). |
 | `WRAPPER_LOG_FILE` | Path to a file for dual logging — log messages are written here in addition to stdout. Same level as `RUST_LOG`. |
 
-Each is a presence/flag variable: define it (to any value) to enable, except
+- Each is a presence/flag variable: define it (to any value) to enable, except
 `WRAPPER_ARGS_CHAR_LIMIT` and `WRAPPER_LOG_FILE`, which take a value. Note that
-split now requires `WRAPPER_SPLIT_FLAGS` — it is the only step that is disabled
-unless explicitly requested.
+split and fix flag prefixes require `WRAPPER_SPLIT_FUSED_FLAGS` and `WRAPPER_FIX_FLAG_PREFIXES`
+respectively — they are the only steps that are disabled unless explicitly requested.
+
 ---
 
 ## Testing
@@ -229,15 +237,15 @@ and extra-flag splicing (placement rules for value flags and source files).
 
 ## Notes / caveats
 
-* The `sccache*` wrappers derive the real tool name from the wrapper name
+- The `sccache*` wrappers derive the real tool name from the wrapper name
   (`sccache-clang …`) or, for the bare `sccache` wrapper, from the first
   argument, and let `sccache` drive the actual tool.
-* All raw flag tables (bad / swap / extra) are declared once per family/kind in
+- All raw flag tables (bad / swap / extra) are declared once per family/kind in
   `src/constants.rs`; classification is done by keywords on the deputy
   executable's name, so unrecognised tools default to `UNKNOWN` (no filter
   pack, and the `UNKNOWN` combination panics in `get_args_filter_pack`).
-* Flag parsing (which flags take a value, where options end, etc.) is delegated
+- Flag parsing (which flags take a value, where options end, etc.) is delegated
   to the `zccache-depgraph` crate — there are no hardcoded flag lists in the
   wrapper itself.
-* Output found when searching the baked-in paths is reported at `info` level;
+- Output found when searching the baked-in paths is reported at `info` level;
   enable `RUST_LOG=debug`/`trace` to see the full rewritten argument list.

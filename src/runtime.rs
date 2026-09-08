@@ -71,11 +71,11 @@ impl Runtime {
     pub fn print_info(&self) {
         debug!("Src File: {}", self.src_file);
         debug!("Src Executable: {}", self.src_executable);
-        info!("Input Args: {:?}", self.input_args);
+        warn!("Input Args: {:?}", self.input_args);
         debug!("Target Executable Names: {:?}", self.target_executable_names);
-        warn!("Target Classification: {:?}", self.target_classification);
+        info!("Target Classification: {:?}", self.target_classification);
         info!("Target Executable Paths: {:?}", self.target_executable_paths);
         warn!("Final Args: {:?}", self.final_args);
-        debug!("Expect: {}", self.expect);
+        trace!("Expect: {}", self.expect);
     }
 }
