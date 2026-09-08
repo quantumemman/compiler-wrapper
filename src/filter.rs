@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use crate::parser::{find_options_end, locate_last_flag};
 use crate::classification::ExecutableFamily;
-use crate::constants::{ARGS_CHAR_LIMIT, RESPONSE_FILE_NAME, COMMON_SPLIT_FLAGS};
+use crate::constants::{ARGS_CHAR_LIMIT, RESPONSE_FILE_NAME, SPLIT_FUSED_FLAGS, FIX_FLAG_PREFIXES};
 
 /// Configuration controlling which filtering steps run. Derived from env vars
 /// in `filter_args`; kept as data so the pure logic in `apply_filter` is unit-testable
@@ -14,6 +14,7 @@ use crate::constants::{ARGS_CHAR_LIMIT, RESPONSE_FILE_NAME, COMMON_SPLIT_FLAGS};
 #[derive(Default)]
 pub struct FilterConfig {
     pub skip_split: bool,            // skip splitting fused /Fd<dir> /Fo<dir> flags
+    pub skip_prefixes: bool,         // skip fixing flag prefixes
     pub skip_bad: bool,              // skip removing bad flags
     pub skip_swap: bool,             // skip swapping problematic flags
     pub skip_add: bool,              // skip appending extra helpful flags
@@ -26,8 +27,10 @@ impl FilterConfig {
     pub fn from_env() -> Self {
         let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
-            // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FLAGS opts it back in.
-            skip_split: skip_all || !env::var("WRAPPER_SPLIT_FLAGS").is_ok(),
+            // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FUSED_FLAGS opts it back in.
+            skip_split: skip_all || !env::var("WRAPPER_SPLIT_FUSED_FLAGS").is_ok(),
+            // Fixing flag prefixes is OFF by default; WRAPPER_FIX_FLAG_PREFIXES opts it back in.
+            skip_prefixes: skip_all || !env::var("WRAPPER_FIX_FLAG_PREFIXES").is_ok(),
             skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
             skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
             skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
@@ -68,13 +71,19 @@ pub fn apply_filter(
     };
     trace!("After split: {:?}", split_args);
 
-    // Step 2: Remove bad flags
+    // Step 2: Fix flag prefixes
+    if config.skip_prefixes {
+        split_args = fix_flag_prefixes(split_args);
+        trace!("After flag prefix fixing: {:?}", split_args);
+    }
+
+    // Step 3: Remove bad flags
     if !config.skip_bad {
         split_args = split_args.into_iter().filter(|a| !bad_flags.is_match(a)).collect();
         trace!("After bad flag removal: {:?}", split_args);
     }
 
-    // Step 3: Swap flags
+    // Step 4: Swap flags
     if !config.skip_swap {
         for (regex, replacement) in swap_pairs {
             split_args = split_args.into_iter().map(|a| {
@@ -90,7 +99,7 @@ pub fn apply_filter(
         trace!("After flag swapping: {:?}", split_args);
     }
 
-    // Step 4: Insert extra flags
+    // Step 5: Insert extra flags
     if !config.skip_add && !extra_flags.is_empty() {
         let extra: Vec<String> = extra_flags.split_whitespace().map(|s| s.to_string()).collect();
         if !extra.is_empty() {
@@ -99,13 +108,13 @@ pub fn apply_filter(
     }
     trace!("After extra flags: {:?}", split_args);
 
-    // Step 5: Response file emission
+    // Step 6: Response file emission
     split_args = maybe_emit_response_file(split_args, config);
 
     split_args
 }
 
-/// Split fused flags into individual flags using [`COMMON_SPLIT_FLAGS`].
+/// Split fused flags into individual flags using [`SPLIT_FUSED_FLAGS`].
 /// For example, `/Fdsome\\target\\directory` becomes `["/Fd", "some\\target\\directory"]`.
 fn split_flags(args: Vec<String>) -> Vec<String> {
     let mut result = Vec::new();
@@ -123,16 +132,28 @@ fn split_flags(args: Vec<String>) -> Vec<String> {
     result
 }
 
-/// Split a fused flag into its prefix and value using [`COMMON_SPLIT_FLAGS`].
+/// Split a fused flag into its prefix and value using [`SPLIT_FUSED_FLAGS`].
 /// Returns `None` if the flag does not match any known prefix.
 fn split_combined_flag(arg: &str) -> Option<Vec<String>> {
-    let caps = COMMON_SPLIT_FLAGS.captures(arg)?;
+    let caps = SPLIT_FUSED_FLAGS.captures(arg)?;
     let prefix = caps.get(0)?.as_str();
     if prefix.len() < arg.len() {
         let value = &arg[prefix.len()..];
         return Some(vec![prefix.to_string(), value.to_string()]);
     }
     None
+}
+
+/// Fix flag prefixes that have slashes instead of dashes.
+/// For example, `/version:0.0` becomes `-version:0.0`.
+fn fix_flag_prefixes(args: Vec<String>) -> Vec<String> {
+    args.into_iter().map(|arg| {
+        if FIX_FLAG_PREFIXES.is_match(&arg) {
+            arg.replacen('/', "-", 1)
+        } else {
+            arg
+        }
+    }).collect()
 }
 
 /// Insert extra flags at the appropriate position in the argument list.

@@ -60,23 +60,31 @@ pub static PROJECT_SIGNATURE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(
 pub static LLVM_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/](permissive-|(D[-/])?bigobj|EGR|W3|W4|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
 pub static MSVC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^([-/](clang:))?[-/]((D[-/])?bigobj|GR|Od|W3|W4|Wc\+\+11-narrowing|Wincompatible-pointer-types|Wimplicit-function-declaration|Wdeprecated-declarations|Wextern-initializer|Wold-style-cast|Wunused-variable|Wunused-function|Wunused-command-line-argument|Wlogical-op-parentheses|Wignored-attributes|Wunknown-warning-option)$"#).unwrap()});
 pub static GCC_COMPILER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror|ffast-math|fstrict-aliasing|fpack-struct|fshort-enum)"#).unwrap()});
-pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
-pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/]INCREMENTAL:NO$"#).unwrap()});
+pub static LLVM_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror)"#).unwrap()});
+pub static MSVC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror)"#).unwrap()});
 pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Werror)"#).unwrap()});
 
-/// Flags whose value may be fused to the prefix (e.g. `/Fdsome\dir`,
-/// `/Foout.obj`). When the split-flags feature is enabled, these get split into
-/// two tokens: the prefix and the value. The user controls which flags match.
-pub static COMMON_SPLIT_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Fd|Fo)"#).unwrap()});
+// Flags whose value are fused with the prefix (e.g. `/Fdsome\dir`, `/Foout.obj`).
+// When the split-flags feature is enabled, these get split into the prefix and the value e.g. `/Fd` and `some\dir`.
+pub static SPLIT_FUSED_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Fd|Fo)"#).unwrap()});
+
+// Flags that need their prefix fixed (e.g. `/version:0.0` -> `-version:0.0`)
+pub static FIX_FLAG_PREFIXES: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[/](version)"#).unwrap()});
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                            Swap pairs per classification                            //
 /////////////////////////////////////////////////////////////////////////////////////////
 
+pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"^[-/]Zi$").expect(BAD_MATCH_MESSAGE), "/Z7".into()),
+    ]
+});
+
 pub static LLVM_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"^[-/]MD(d)?$").expect(BAD_MATCH_MESSAGE), "-fms-extensions".into()),
-        (Regex::new(r"^[-/]Zi$").expect(BAD_MATCH_MESSAGE), "-g".into()),
+        (Regex::new(r"^[-/]Z(i|7)$").expect(BAD_MATCH_MESSAGE), "-g".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
         (Regex::new(r"^[-/]O1$").expect(BAD_MATCH_MESSAGE), "-O1".into()),
         (Regex::new(r"^[-/]O2$").expect(BAD_MATCH_MESSAGE), "-O2".into()),
         (Regex::new(r"^[-/]O3$").expect(BAD_MATCH_MESSAGE), "-O3".into()),
@@ -84,53 +92,41 @@ pub static LLVM_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::
     ]
 });
 
-pub static LLVM_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+pub static GCC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"^[-/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
-        (Regex::new(r"^[-/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
-        (Regex::new(r"^[-/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
-    ]
-});
-
-pub static MSVC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
-    vec![
-        (Regex::new(r"^[/]bigobj$").expect(BAD_MATCH_MESSAGE), "-bigobj".into()),
-        (Regex::new(r"^[-/]fms-extensions$").expect(BAD_MATCH_MESSAGE), "/MD".into()),
-        (Regex::new(r"^[-/]g$").expect(BAD_MATCH_MESSAGE), "/Zi".into()),
+        (Regex::new(r"^[-/]Z(i|7)$").expect(BAD_MATCH_MESSAGE), "-g".into()),
     ]
 });
 
 pub static MSVC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
         (Regex::new(r"^[-/]flto$").expect(BAD_MATCH_MESSAGE), "/LTCG".into()),
-        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "".into()),
-        (Regex::new(r"^[/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
-        (Regex::new(r"^[/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[/]INCREMENTAL(:YES)?$").expect(BAD_MATCH_MESSAGE), "/INCREMENTAL:NO".into()),
+        // (Regex::new(r"^[/]MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "/MANIFEST:NO".into()),
     ]
 });
 
-pub static GCC_COMPILER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
+pub static LLVM_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
     ]
 });
 
 pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"^[-/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
-        (Regex::new(r"^[-/]?MANIFEST:EMBED(,ID=\d+)?$").expect(BAD_MATCH_MESSAGE), "".into()),
-        (Regex::new(r"^[-/]INCREMENTAL:NO$").expect(BAD_MATCH_MESSAGE), "".into()),
+        (Regex::new(r"^[/]LTCG$").expect(BAD_MATCH_MESSAGE), "-flto".into()),
     ]
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                  Define Extra Flags                                 //
 /////////////////////////////////////////////////////////////////////////////////////////
-pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -Wno-everything";
-pub const LLVM_LINKER_EXTRA_FLAGS: &str = "";
-pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -w -W0";
-pub const MSVC_LINKER_EXTRA_FLAGS: &str = "";
-pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-w";
-pub const GCC_LINKER_EXTRA_FLAGS: &str = "";
+pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -w -W0";
+pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -w -Wno-everything";
+pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE-w -W0";
+pub const MSVC_LINKER_EXTRA_FLAGS: &str = "/LTCG";
+pub const LLVM_LINKER_EXTRA_FLAGS: &str = "-flto";
+pub const GCC_LINKER_EXTRA_FLAGS: &str = "-flto";
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                                 General Constants                                   //
