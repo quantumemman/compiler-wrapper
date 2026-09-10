@@ -1,9 +1,5 @@
 use std::env;
-
-use crate::constants::{
-    CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,
-    CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG,
-};
+use crate::constants::{CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG};
 
 /// Package version from Cargo.toml
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -195,6 +191,18 @@ pub fn print_usage(executable_name: String) -> bool {
     // ---- Filtering ----
     lines.push(section_row("FILTERING", INNER));
     lines.extend(usage_pair(
+        "WRAPPER_SPLIT_FUSED_FLAGS",
+        "Enable splitting fused flag+value step.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_FIX_FLAG_PREFIXES",
+        "Enable fixing flag prefixes (e.g., /version:0.0 to -version:0.0).",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
         "WRAPPER_SKIP_BAD_FLAGS",
         "Skip bad flags removal step.",
         NAME_W,
@@ -213,14 +221,8 @@ pub fn print_usage(executable_name: String) -> bool {
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_SPLIT_FUSED_FLAGS",
-        "Enable splitting fused flag+value step.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        "WRAPPER_FIX_FLAG_PREFIXES",
-        "Enable fixing flag prefixes (e.g., /version:0.0 to -version:0.0).",
+        "WRAPPER_SKIP_ALL_FLAGS",
+        "Skip all opt-out flag processing i.e. bad, swap, add.",
         NAME_W,
         INNER,
     ));

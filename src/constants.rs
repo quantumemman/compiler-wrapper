@@ -69,7 +69,7 @@ pub static GCC_LINKER_BAD_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(
 pub static SPLIT_FUSED_FLAGS: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[-/](Fd|Fo)"#).unwrap()});
 
 // Flags that need their prefix fixed (e.g. `/version:0.0` -> `-version:0.0`)
-pub static FIX_FLAG_PREFIXES: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^[/](version)"#).unwrap()});
+pub static FIX_FLAG_PREFIXES: LazyLock<Regex> = LazyLock::new(|| {Regex::new(r#"^(?i)[/](version:)"#).unwrap()});
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                            Swap pairs per classification                            //
@@ -123,7 +123,7 @@ pub static GCC_LINKER_SWAP_PAIRS: LazyLock<Vec<(Regex, String)>> = LazyLock::new
 /////////////////////////////////////////////////////////////////////////////////////////
 pub const MSVC_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -w -W0";
 pub const LLVM_COMPILER_EXTRA_FLAGS: &str = "-D_USE_MATH_DEFINES -D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -w -Wno-everything";
-pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE-w -W0";
+pub const GCC_COMPILER_EXTRA_FLAGS: &str = "-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -w";
 pub const MSVC_LINKER_EXTRA_FLAGS: &str = "/LTCG";
 pub const LLVM_LINKER_EXTRA_FLAGS: &str = "-flto";
 pub const GCC_LINKER_EXTRA_FLAGS: &str = "-flto";

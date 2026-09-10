@@ -8,7 +8,7 @@ fn main() -> ExitCode {
     let src_executable = env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
     let input_args: Vec<String> = env::args().skip(1).collect();  // grab all args except the first one (this program's name)
     
-    if !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() {
+    if !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
         if check_help_flags(&src_executable, &input_args) {
             return ExitCode::SUCCESS;   // Print usage if help flags are present and exit
         } else if check_version_flags(&src_executable, &input_args) {
