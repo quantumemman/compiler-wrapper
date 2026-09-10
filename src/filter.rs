@@ -28,9 +28,9 @@ impl FilterConfig {
         let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
             // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FUSED_FLAGS opts it back in.
-            skip_split: skip_all || !env::var("WRAPPER_SPLIT_FUSED_FLAGS").is_ok(),
+            skip_split: !env::var("WRAPPER_SPLIT_FUSED_FLAGS").is_ok(),
             // Fixing flag prefixes is OFF by default; WRAPPER_FIX_FLAG_PREFIXES opts it back in.
-            skip_prefixes: skip_all || !env::var("WRAPPER_FIX_FLAG_PREFIXES").is_ok(),
+            skip_prefixes: !env::var("WRAPPER_FIX_FLAG_PREFIXES").is_ok(),
             skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
             skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
             skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
@@ -72,7 +72,7 @@ pub fn apply_filter(
     trace!("After split: {:?}", split_args);
 
     // Step 2: Fix flag prefixes
-    if config.skip_prefixes {
+    if !config.skip_prefixes {
         split_args = fix_flag_prefixes(split_args);
         trace!("After flag prefix fixing: {:?}", split_args);
     }
