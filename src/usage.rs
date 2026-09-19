@@ -1,5 +1,6 @@
 use std::env;
-use crate::constants::{CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG};
+use crate::runtime::{Runtime};
+use crate::constants::{NONE_KEYWORD, CLI_HELP_FLAGS, CLI_VERSION_FLAGS};
 
 /// Package version from Cargo.toml
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -130,7 +131,7 @@ fn section_row(title: &str, inner: usize) -> String {
 
 /// Prints the wrapper usage/help message.
 /// Returns `true` if the help message was shown (so the caller can exit), `false` otherwise.
-pub fn print_usage(executable_name: String) -> bool {
+pub fn print_usage(runtime: &Runtime) -> bool {
     const INNER: usize = 90; // usable text columns between the two side borders
     const NAME_W: usize = 30; // reserved width for the variable-name column
     let rule = "═".repeat(INNER + 2);
@@ -140,8 +141,21 @@ pub fn print_usage(executable_name: String) -> bool {
     // ---- Heading ----
     lines.push(box_row("", INNER));
     lines.push(box_row(
-        &center_text(
-            &paint(format!("{} v{} — Compiler Argument Wrapper Helper", executable_name, VERSION).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+        &center_text(&paint(format!("Usage - wrapper {} v{}", runtime.current_executable, VERSION).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+            INNER,
+        ),
+        INNER,
+    ));
+    lines.push(box_row(
+        &center_text(&paint(format!("-> {}", runtime.main_exe).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+            INNER,
+        ),
+        INNER,
+    ));
+    lines.push(box_row(
+        &center_text(&paint(
+            (if runtime.deputy_exe != NONE_KEYWORD { format!("-> {}", runtime.deputy_exe.clone()) }
+            else { String::new() }).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
             INNER,
         ),
         INNER,
@@ -183,7 +197,7 @@ pub fn print_usage(executable_name: String) -> bool {
     ));
     lines.extend(usage_pair(
         "WRAPPER_LOG_FILE",
-        format!("Path to log file e.g. /path/to/{}.log.", executable_name.trim_end_matches(".exe")).as_str(),
+        format!("Path to log file e.g. /path/to/{}.log.", runtime.current_executable.trim_end_matches(".exe")).as_str(),
         NAME_W,
         INNER,
     ));
@@ -198,7 +212,7 @@ pub fn print_usage(executable_name: String) -> bool {
     ));
     lines.extend(usage_pair(
         "WRAPPER_FIX_FLAG_PREFIXES",
-        "Enable fixing flag prefixes (e.g., /version:0.0 to -version:0.0).",
+        "Enable fixing flag prefixes (e.g., /version:0.0 -> -version:0.0).",
         NAME_W,
         INNER,
     ));
@@ -239,20 +253,14 @@ pub fn print_usage(executable_name: String) -> bool {
     // ---- CLI Flags ----
     lines.push(section_row("CLI FLAGS", INNER));
     lines.extend(usage_pair(
-        &format!("{} / {}", CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG),
-        "Print this help message and exit.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        CLI_FLAG_USAGE,
-        "Print this help message and exit.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        &format!("{} / {}", CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG),
+        &format!("{:?}", CLI_VERSION_FLAGS.join("|")),
         "Print version information and exit.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        &format!("{:?}", CLI_HELP_FLAGS.join("|")),
+        "Print this usage message and exit.",
         NAME_W,
         INNER,
     ));
@@ -279,20 +287,20 @@ pub fn print_usage(executable_name: String) -> bool {
 
 /// Checks if any of the CLI args are help/usage flags.
 /// If so, prints the usage message and returns `true`.
-pub fn check_help_flags(src_executable: &String, args: &[String]) -> bool {
-    let help_flags = [CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE];
-    if help_flags.contains(&args[0].as_str()) {
-        return print_usage(src_executable.to_string()); // Print usage if help flags are present and exit
+pub fn help_message(runtime: &Runtime) -> bool {
+    if CLI_HELP_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+        return print_usage(&runtime);  // Print usage if help flags are present and exit
     }
     false
 }
 
 /// Checks if any of the CLI args are version flags.
 /// If so, prints the version message and returns `true`.
-pub fn check_version_flags(src_executable: &String, args: &[String]) -> bool {
-    let version_flags = [CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG];
-    if version_flags.contains(&args[0].as_str()) {
-        println!("{} v{}", src_executable, VERSION);
+pub fn version_message(runtime: &Runtime) -> bool {
+    if CLI_VERSION_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+        println!(">> wrapper {} v{}", runtime.current_executable, VERSION);
+        println!("-> {}", runtime.main_exe);
+        if runtime.deputy_exe != NONE_KEYWORD { println!("-> {}", runtime.deputy_exe);}
         return true;
     }
     false

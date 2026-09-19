@@ -9,13 +9,13 @@ mod logger;
 mod usage;
 
 // Re-export public API
+pub use executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 pub use classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
 pub use filter::{FilterConfig, filter_args, apply_filter};
 pub use parser::{parse_args, locate_last_flag, find_options_end, flag_takes_separate_value, embedded_flag_value, is_source_arg, LocatedFlag};
 pub use runtime::Runtime;
 pub use logger::init_logger;
-pub use usage::{print_usage, check_help_flags, check_version_flags};
-pub use executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
+pub use usage::{print_usage, help_message, version_message};
 
 // Re-export constants
 pub use constants::{
@@ -33,8 +33,7 @@ pub use constants::{
     LLVM_COMPILER_BAD_FLAGS, LLVM_LINKER_BAD_FLAGS,
     MSVC_COMPILER_BAD_FLAGS, MSVC_LINKER_BAD_FLAGS,
     GCC_COMPILER_BAD_FLAGS, GCC_LINKER_BAD_FLAGS,
-    CLI_FLAG_HELP_SHORT, CLI_FLAG_HELP_LONG, CLI_FLAG_USAGE,
-    CLI_FLAG_VERSION_SHORT, CLI_FLAG_VERSION_LONG,
+    CLI_HELP_FLAGS, CLI_VERSION_FLAGS
 };
 
 #[cfg(test)]

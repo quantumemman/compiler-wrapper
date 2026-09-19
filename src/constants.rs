@@ -19,13 +19,13 @@ pub const WRAPPER_PATH: &str = env!("WRAPPER_WRAPPER_PATH");
 /// Returns the ordered list of executable search paths.
 /// If `WRAPPER_PREFER_VS` is set, prefers Visual Studio's LLVM toolchain;
 /// otherwise prefers Custom LLVM.
-pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
+pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
     if env::var("WRAPPER_PREFER_VS").is_ok() {
         log::info!("Preferring Visual Studio LLVM toolchain");
-        [LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
+        &[LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
     } else {
         log::debug!("Preferring Custom LLVM toolchain");
-        [LLVM_PATH, LLVM_PATH_VS, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
+        &[LLVM_PATH, LLVM_PATH_VS, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
     }
 });
 
@@ -36,7 +36,7 @@ pub static PATHS: LazyLock<[&str; 5]> = LazyLock::new(|| {
 pub static EXTERNAL_WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
 
 // Compiler executable keywords
-pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
+pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+|gpp)"#).unwrap());
 
 // Linker executable keywords
 pub static LINKER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(link|lld)"#).unwrap());
@@ -48,7 +48,7 @@ pub static LLVM_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(
 pub static MSVC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(cl|link)"#).unwrap());
 
 // GCC family keywords
-pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
+pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|gpp|ld)"#).unwrap());
 
 // Matches executable names that are wrappers from this project like clang-rs
 // to avoid doing their work for them since they will be called by this program
@@ -135,6 +135,8 @@ pub const GCC_LINKER_EXTRA_FLAGS: &str = "-flto";
 pub const ARGS_CHAR_LIMIT: usize = 30000;
 /// Unknown keyword placeholder
 pub const UNKNOWN_KEYWORD: &str = "UNKNOWN";
+/// None keyword placeholder
+pub const NONE_KEYWORD: &str = "NONE";
 /// Bad match message for regex construction errors
 pub const BAD_MATCH_MESSAGE: &str = "bad match";
 /// Response file name pattern (uses process ID)
@@ -143,13 +145,5 @@ pub const RESPONSE_FILE_NAME: &str = "@wrapper_<pid>.rsp";
 /////////////////////////////////////////////////////////////////////////////////////////
 //                              CLI Flag Constants                                     //
 /////////////////////////////////////////////////////////////////////////////////////////
-/// Short help flag
-pub const CLI_FLAG_HELP_SHORT: &str = "-h";
-/// Long help flag
-pub const CLI_FLAG_HELP_LONG: &str = "--help";
-/// Usage flag
-pub const CLI_FLAG_USAGE: &str = "--usage";
-/// Short version flag
-pub const CLI_FLAG_VERSION_SHORT: &str = "-v";
-/// Long version flag
-pub const CLI_FLAG_VERSION_LONG: &str = "--version";
+pub const CLI_HELP_FLAGS: &[&str] = &["-h", "-help", "--help", "-usage", "--usage"];
+pub const CLI_VERSION_FLAGS: &[&str] = &["-v", "-version", "--version"];

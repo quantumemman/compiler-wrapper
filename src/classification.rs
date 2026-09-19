@@ -1,5 +1,6 @@
 use std::env;
 use regex::Regex;
+use log::{debug};
 use crate::constants::{
     LLVM_KEYWORDS, MSVC_KEYWORDS, GCC_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS,
     LLVM_COMPILER_BAD_FLAGS, MSVC_COMPILER_BAD_FLAGS, GCC_COMPILER_BAD_FLAGS,
@@ -29,6 +30,7 @@ pub enum ExecutableKind {
 
 /// Classify a executable path into a (family, kind) tuple.
 pub fn get_target_classification(executable_name: &str) -> (ExecutableFamily, ExecutableKind) {
+    debug!("Classifying target executable: {}", executable_name);
     // treat clang-cl as MSVC family unless requested then treat as LLVM
     let family = if executable_name.contains("clang-cl") && !env::var("WRAPPER_CLANG_CL_IS_LLVM").is_ok() {
         ExecutableFamily::MSVC

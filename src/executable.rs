@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use log::{debug, trace};
-use crate::constants::{PATHS, UNKNOWN_KEYWORD, EXTERNAL_WRAPPER_KEYWORDS, COMPILER_KEYWORDS, LINKER_KEYWORDS, PROJECT_SIGNATURE};
+use crate::constants::{PATHS, UNKNOWN_KEYWORD, NONE_KEYWORD, EXTERNAL_WRAPPER_KEYWORDS, 
+    COMPILER_KEYWORDS, LINKER_KEYWORDS, PROJECT_SIGNATURE
+};
 
 /// Split the source executable name into (wrapper, tool) pair.
 /// For combined forms like "sccache-clang-cl", this returns ("sccache", "clang-cl").
@@ -56,12 +58,12 @@ fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
 /// Resolve the full paths for the wrapper and tool executables.
 pub fn get_executable_paths(target_executable_names: &(String, String)) -> (String, String) {
     let wrapper_path: String = find_executable(&target_executable_names.0, &*PATHS)
-        .unwrap_or(UNKNOWN_KEYWORD.into())
+        .unwrap_or(NONE_KEYWORD.into())
         .to_str()
         .unwrap_or("")
         .to_string();
     let executable_path: String = find_executable(&target_executable_names.1, &*PATHS)
-        .unwrap_or(UNKNOWN_KEYWORD.into())
+        .unwrap_or(NONE_KEYWORD.into())
         .to_str()
         .unwrap_or("")
         .to_string();
@@ -70,11 +72,16 @@ pub fn get_executable_paths(target_executable_names: &(String, String)) -> (Stri
 
 /// Determine the main (wrapper) and deputy (tool) executable paths.
 pub fn get_main_and_deputy_executable_paths(target_executable_names: &(String, String)) -> (String, String) {
-    let deputy_executable: String = target_executable_names.1.clone();
-    let main_executable: String = if target_executable_names.0 != UNKNOWN_KEYWORD {
-        target_executable_names.0.clone()
-    } else {
-        deputy_executable.clone()
-    };
+    let mut main_executable = NONE_KEYWORD.to_string();
+    let mut deputy_executable = NONE_KEYWORD.to_string();
+
+    if target_executable_names.0 != NONE_KEYWORD {
+        main_executable = target_executable_names.0.clone();
+        if target_executable_names.1 != NONE_KEYWORD {
+            deputy_executable = target_executable_names.1.clone();
+        }
+    } else if target_executable_names.1 != NONE_KEYWORD {
+        main_executable = target_executable_names.1.clone();
+    }
     (main_executable, deputy_executable)
 }
