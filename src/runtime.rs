@@ -1,8 +1,8 @@
 use std::env;
 use std::path::Path;
-use log::{debug, info, trace, warn};
+use log::{trace, debug, info, warn};
 use crate::filter::{FilterConfig, filter_args};
-use crate::constants::{UNKNOWN_KEYWORD};
+use crate::constants::{NONE_KEYWORD};
 use crate::executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
 
@@ -10,6 +10,7 @@ use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classif
 pub struct Runtime {
     pub src_file: String,
     pub src_executable: String,
+    pub current_executable: String,
     pub input_args: Vec<String>,
     pub target_executable_names: (String, String),
     pub target_executable_paths: (String, String),
@@ -27,6 +28,9 @@ impl Runtime {
         let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().trim_end_matches(".rs").to_string();
         trace!("Src executable: {}", src_executable);
 
+        let current_executable = env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+        trace!("Current executable: {}", current_executable);
+
         let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
         trace!("Target executable names: {:?}", target_executable_names);
 
@@ -36,7 +40,7 @@ impl Runtime {
         let (main_exe, deputy_exe): (String, String) = get_main_and_deputy_executable_paths(&target_executable_paths);
         info!("Main exe: {}, Deputy exe: {}", main_exe, deputy_exe);
 
-        let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&deputy_exe);
+        let target_classification: (ExecutableFamily, ExecutableKind) = get_target_classification(&target_executable_names.1);
         debug!("Target classification: {:?}", target_classification);
 
         // Check to see if passthrough mode is enabled to skip args processing
@@ -49,14 +53,15 @@ impl Runtime {
             final_args = filter_args(input_args.clone(), &bad_flags, &swap_pairs, &extra_flags.to_string(), &FilterConfig::from_env(), target_classification.0);
         }
 
-        if target_executable_names.0 != UNKNOWN_KEYWORD {
+        if deputy_exe != NONE_KEYWORD {
             final_args.insert(0, deputy_exe.clone())
         }
-        let expect: String = deputy_exe.clone() + " died";
+        let expect: String = main_exe.clone() + " died";
 
         Runtime {
             src_file,
             src_executable,
+            current_executable,
             input_args,
             target_executable_names,
             target_executable_paths,
@@ -71,6 +76,7 @@ impl Runtime {
     pub fn print_info(&self) {
         debug!("Src File: {}", self.src_file);
         debug!("Src Executable: {}", self.src_executable);
+        debug!("Current Executable: {}", self.current_executable);
         warn!("Input Args: {:?}", self.input_args);
         debug!("Target Executable Names: {:?}", self.target_executable_names);
         info!("Target Classification: {:?}", self.target_classification);
