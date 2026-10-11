@@ -1,6 +1,6 @@
 use log::warn;
 use std::path::Path;
-use crate::classification::ExecutableFamily;
+use crate::classify::ExecutableFamily;
 use zccache_depgraph::args::{ParsedArgs, parse_gnu_args};
 use zccache_depgraph::msvc_args::parse_msvc_args;
 
@@ -109,11 +109,11 @@ pub struct LocatedFlag {
     pub embedded_value: Option<String>,
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-///               Locate the last flag in a command line, family-aware                 //
-/////////////////////////////////////////////////////////////////////////////////////////
-/// Scans from the end. The `--` end-of-options marker and everything after it
-/// are treated as positional, and a lone `-` (stdin/stdout) is not a flag.
+////////////////////////////////////////////////////////////////////////////////////////
+//               Locate the last flag in a command line, family-aware                 //
+////////////////////////////////////////////////////////////////////////////////////////
+// Scans from the end. The `--` end-of-options marker and everything after it
+// are treated as positional, and a lone `-` (stdin/stdout) is not a flag.
 pub fn locate_last_flag(args: &[String], family: ExecutableFamily) -> Option<LocatedFlag> {
     // `--` ends option parsing: it and everything after it are positional.
     let option_end = args

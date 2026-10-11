@@ -8,7 +8,7 @@ use regex::Regex;
 // Microsoft Visual C++ toolchain path
 pub const MSVC_PATH: &str = env!("WRAPPER_MSVC_PATH");
 // Visual Studio LLVM toolchain path
-pub const LLVM_PATH_VS: &str = env!("WRAPPER_LLVM_PATH_VS");
+pub const VS_LLVM_PATH: &str = env!("WRAPPER_VS_LLVM_PATH");
 // Custom LLVM toolchain path
 pub const LLVM_PATH: &str = env!("WRAPPER_LLVM_PATH");
 // GNU Compiler Collection path
@@ -22,10 +22,10 @@ pub const WRAPPER_PATH: &str = env!("WRAPPER_WRAPPER_PATH");
 pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
     if env::var("WRAPPER_PREFER_VS").is_ok() {
         log::info!("Preferring Visual Studio LLVM toolchain");
-        &[LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
+        &[VS_LLVM_PATH, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
     } else {
-        log::debug!("Preferring Custom LLVM toolchain");
-        &[LLVM_PATH, LLVM_PATH_VS, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
+        log::debug!("Preferring Custom LLVM toolchain (default)");
+        &[LLVM_PATH, VS_LLVM_PATH, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
     }
 });
 
@@ -36,7 +36,7 @@ pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
 pub static EXTERNAL_WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
 
 // Compiler executable keywords
-pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+|gpp)"#).unwrap());
+pub static COMPILER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(clang|cl|gcc|g\+\+)"#).unwrap());
 
 // Linker executable keywords
 pub static LINKER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(link|lld)"#).unwrap());
@@ -48,7 +48,7 @@ pub static LLVM_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(
 pub static MSVC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(cl|link)"#).unwrap());
 
 // GCC family keywords
-pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|gpp|ld)"#).unwrap());
+pub static GCC_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(gcc|g\+\+|ld)"#).unwrap());
 
 // Matches executable names that are wrappers from this project like clang-rs
 // to avoid doing their work for them since they will be called by this program

@@ -11,9 +11,32 @@ A Rust wrapper for C/C++ toolchain executables (Clang/LLVM, MSVC, GCC, GNU
    forwarding its exit status.
 
 The wrappers are thin binaries that all share the same logic in `src/lib.rs`
-(the `wrapper` library crate). Each binary's `main` is a few lines: initialize
-the logger, optionally print the usage/help banner, build a `Runtime`, then
+(the `wrapper` library crate) plus one shared entry point in `src/main.rs`.
+Each binary's `main` is a few lines: initialize the logger, optionally print
+the usage/help banner, build a `Runtime` from the Cargo binary name, then
 spawn the target tool with the processed arguments.
+
+---
+
+## Adding / building only the wrappers you need
+
+All `[[bin]]` entries in `Cargo.toml` point at the same `src/main.rs`.
+The wrapper knows which tool it is from its `[[bin]] name` via
+`env!("CARGO_BIN_NAME")` — no per-tool source file needed.
+
+- **Build everything:** `cargo build --release`
+- **Build just what you need:** `cargo build --release --bin clang-rs --bin gcc-rs`
+- **Add a new wrapper:** copy a `[[bin]]` block in `Cargo.toml`, set `name`
+  (must be a valid crate name: alphanumeric, `-`, `_` — no `+`), keep
+  `path = "src/main.rs"`. If the real tool name needs characters Cargo
+  forbids (e.g. `clang++`, `g++`), keep the `pp` spelling in `name`
+  (`clangpp-rs`) and add a mapping in `BIN_NAME_ALIASES` in
+  `src/constants.rs` — that is the only other file you should need to touch.
+
+> `name` is a passenger for `cargo`/`--bin` selection; the resolved tool name
+> (after `pp` → `++` normalization and `-rs` suffix stripping) is what the
+> wrapper actually dispatches to. The nightly-only `filename` field
+> (`different-binary-name`) is deliberately *not* used so stable Rust works.
 
 ---
 
@@ -21,34 +44,38 @@ spawn the target tool with the processed arguments.
 
 ```text
 wrapper/
-├── Cargo.toml        # crate manifest; defines every [[bin]] wrapper
+├── Cargo.toml        # crate manifest; defines every [[bin]] wrapper to point to src/main.rs
 ├── src/
-│   ├── lib.rs        # all shared logic (path lookup, classification, filtering)
-│   ├── constants.rs  # user-editable flag tables and search paths
-│   └── *.rs          # one near-identical main per wrapper binary
+│   ├── lib.rs        # all shared logic (path lookup, classify, filtering)
+│   ├── main.rs       # single shared entry point; identity obtained via env!("CARGO_BIN_NAME")
+│   ├── constants.rs  # user-editable flag tables, and search paths
+│   └── *.rs          # library modules (executable, classify, filter, parser, runtime, ...)
 └── target/           # cargo build output (git-ignored)
 ```
 
 ### Binaries
 
-| Wrapper (`cargo build` target) | Underlying tool it dispatches to |
-|--------------------------------|----------------------------------|
-| `cl-rs`                  | MSVC C/C++ compiler (`cl`) |
-| `clang-rs`               | Clang C compiler |
-| `clangpp-rs`             | Clang++ C++ compiler |
-| `clang-cl-rs`            | Clang in MSVC-compatible mode (`clang-cl`) |
-| `gcc-rs`                 | GNU GCC |
-| `gpp-rs`                 | GNU G++ |
-| `link-rs`                | MSVC linker (`link`) |
-| `lld-link-rs`            | LLVM `lld-link` |
-| `ld-rs`                  | GNU `ld` |
-| `sccache-rs`             | `sccache` (pass-through driver) |
-| `sccache-cl-rs`          | `sccache` + MSVC `cl` |
-| `sccache-clang-rs`, `sccache-clangpp-rs`, `sccache-clang-cl-rs` | `sccache` + Clang family |
-| `sccache-gcc-rs`, `sccache-gpp-rs` | `sccache` + GCC/G++ |
+| Wrapper (`cargo build` target) | Resolves to real tool | Underlying tool it dispatches to |
+|--------------------------------|-----------------------|----------------------------------|
+| `cl-rs`                        | `cl`                  | MSVC C/C++ compiler (`cl`)       |
+| `clang-rs`                     | `clang`               | Clang C compiler                 |
+| `clangpp-rs`                   | `clang++`             | Clang++ C++ compiler             |
+| `clang-cl-rs`                  | `clang-cl`            | Clang in MSVC-compatible mode (`clang-cl`) |
+| `gcc-rs`                       | `gcc`                 | GNU GCC                          |
+| `gpp-rs`                       | `g++`                 | GNU G++                          |
+| `link-rs`                      | `link`                | MSVC linker (`link`)             |
+| `lld-link-rs`                  | `lld-link`            | LLVM `lld-link`                  |
+| `ld-rs`                        | `ld`                  | GNU `ld`                         |
+| `sccache-rs`                   | `sccache`             | `sccache` (pass-through driver)  |
+| `sccache-cl-rs`                | `sccache` + `cl`      | `sccache` + MSVC `cl`            |
+| `sccache-clang-rs`, `sccache-clangpp-rs` (`clang++`), `sccache-clang-cl-rs` | `sccache` + Clang tool | `sccache` + Clang family |
+| `sccache-gcc-rs`, `sccache-gpp-rs` (`g++`) | `sccache` + GCC tool | `sccache` + GCC/G++   |
 
 The `-rs` suffix distinguishes the wrapper executables from the real tools they
-call (e.g. `clang-rs.exe` → invokes `clang.exe`).
+call (e.g. `clang-rs.exe` → invokes `clang.exe`). `pp` in a Cargo binary name
+is an alias for `++` in the real tool (e.g. `clangpp-rs` → `clang++`,
+`gpp-rs` → `g++`); the mapping lives in `BIN_NAME_ALIASES` in
+`src/constants.rs` because `[[bin]] name` cannot contain `+` on stable Rust.
 
 ---
 
@@ -67,7 +94,7 @@ compile time** from environment variables, so they must be set when building:
 | Build-time variable    | Purpose             |
 |------------------------|---------------------|
 | `WRAPPER_MSVC_PATH`    | MSVC toolchain bin directory |
-| `WRAPPER_LLVM_PATH_VS` | Visual Studio’s bundled LLVM (Clang at `LLVM/../../VC/Tools/Llvm`) |
+| `WRAPPER_VS_LLVM_PATH` | Visual Studio’s bundled LLVM (Clang at `LLVM/../../VC/Tools/Llvm`) |
 | `WRAPPER_LLVM_PATH`    | Custom LLVM toolchain bin directory |
 | `WRAPPER_GCC_PATH`     | GCC toolchain bin directory |
 | `WRAPPER_WRAPPER_PATH` | Path to sccache or ccache |
@@ -80,21 +107,29 @@ compile time** from environment variables, so they must be set when building:
 
 ## Runtime behavior
 
-Each wrapper's `main` collects `env::args().skip(1)`, checks for CLI flags
-(`-h`, `--help`, `--usage`, `-v`, `--version`), then builds a `Runtime` and
-runs the real tool:
+Each wrapper's `main` (all share `src/main.rs`) collects `env::args().skip(1)`,
+checks for CLI flags (`-h`, `--help`, `--usage`, `-v`, `--version`), then builds
+a `Runtime` from the Cargo binary name and runs the real tool:
 
 ```rust
-let runtime = Runtime::new(file!().to_string(), input_args);
+let runtime = Runtime::new(env!("CARGO_BIN_NAME").to_string(), input_args);
 let status = Command::new(&runtime.main_exe)
     .args(&runtime.final_args)
     .status()
     .expect(&runtime.expect);
 ```
 
+`env!("CARGO_BIN_NAME")` expands at compile time per `[[bin]]` target, so each
+binary knows its intended wrapper name (e.g. `clangpp-rs`). `Runtime` normalizes
+it (`pp` → `++` via `BIN_NAME_ALIASES`, then strips `-rs`) to get the real tool
+(e.g. `clang++`).
+
 ### Executable resolution
 
-- The wrapper's own name (e.g. `clang-cl-rs`) is derived from its source file.
+- The wrapper's own name (e.g. `clang++-rs`) is derived from the `[[bin]] name`
+  in `Cargo.toml` via `env!("CARGO_BIN_NAME")`, normalized through
+  `BIN_NAME_ALIASES` (`pp` → `++`), with the `-rs` suffix stripped to get the
+  real tool name.
 - `get_executable_names` decides what to invoke. If the name contains a wrapper
   keyword (`ccache`, matched case-insensitively, so it catches `sccache`,
   `ccache`, etc.):
@@ -200,8 +235,8 @@ clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 | Variable | Effect |
 |----------|--------|
 | `WRAPPER_PREFER_VS` | Prefer Visual Studio's LLVM executables over Custom LLVM when locating tools. |
-| `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family (the default). Declaring it explicitly makes the intent immune to default changes. |
-| `WRAPPER_CLANG_CL_IS_MSVC` | Force `clang-cl` to use the MSVC family instead of the default LLVM family. |
+| `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family instead of the default MSVC. |
+| `WRAPPER_CLANG_CL_IS_MSVC` | Default. No effect. Route `clang-cl` to use the MSVC family instead of LLVM. |
 | `WRAPPER_SPLIT_FUSED_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
 | `WRAPPER_FIX_FLAG_PREFIXES` | Fix flag prefixes (**off by default**; enable to turn the fix step on). |
 | `WRAPPER_SKIP_BAD_FLAGS` | Skip removing known-bad flags. |

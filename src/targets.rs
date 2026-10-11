@@ -4,10 +4,20 @@ use crate::constants::{PATHS, UNKNOWN_KEYWORD, NONE_KEYWORD, EXTERNAL_WRAPPER_KE
     COMPILER_KEYWORDS, LINKER_KEYWORDS, PROJECT_SIGNATURE
 };
 
+/// Normalize a `CARGO_BIN_NAME` value into the canonical wrapper name. Strips `.exe` if present,
+// replaces `pp-rs` with `++-rs`, and strips the `-rs` suffix if present, and returns it.
+pub fn normalize_src_name(src_name: &str) -> String {
+    let canonical_name = src_name.to_lowercase().strip_suffix(".exe").unwrap_or(src_name)
+    .replace("pp-rs", "++-rs").to_string();
+    canonical_name
+}
+
 /// Split the source executable name into (wrapper, tool) pair.
 /// For combined forms like "sccache-clang-cl", this returns ("sccache", "clang-cl").
 /// For bare wrappers like "sccache", the first input arg is consumed as the tool.
-/// For non-wrappers like "clang-cl", this returns ("UNKNOWN", "clang-cl").
+/// For non-wrappers like "clang++", this returns ("UNKNOWN", "clang++").
+/// `src_executable` is the real tool spelling: caller strips the `-rs` wrapper
+/// suffix and normalizes `pp` -> `++` before calling.
 pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String>) -> (String, String) {
     let mut wrapper_name = UNKNOWN_KEYWORD.to_string();
     let mut executable_name = wrapper_name.clone();

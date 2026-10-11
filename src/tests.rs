@@ -29,6 +29,50 @@ fn no_extra() -> String {
     String::new()
 }
 
+// ---- Binary name normalization ----------------------------------------
+
+#[test]
+fn normalize_src_name_maps_pp_to_plus_plus() {
+    for (src_name, expect) in [
+        ("clangpp-rs", "clang++-rs"),
+        ("gpp-rs", "g++-rs"),
+        ("sccache-clangpp-rs", "sccache-clang++-rs"),
+        ("sccache-gpp-rs", "sccache-g++-rs"),
+        ("CLANGPP-RS", "clang++-rs"),
+        ("clangpp-rs.exe", "clang++-rs"),
+        ("clang-cl-rs.exe", "clang-cl-rs"),
+    ] {
+        assert_eq!(normalize_src_name(src_name), expect, "normalize {src_name}");
+    }
+}
+
+#[test]
+fn normalize_src_name_passes_through_other_names() {
+    for src_name in ["cl-rs", "clang-rs", "clang-cl-rs", "gcc-rs", "sccache-rs", "sccache-clang-cl-rs"] {
+        assert_eq!(normalize_src_name(src_name), src_name.strip_suffix("-rs").unwrap_or(src_name), "normalize {src_name}");
+    }
+}
+
+#[test]
+fn src_name_resolves_to_real_tool_names() {
+    // End-to-end through Runtime's naming logic: CARGO_BIN_NAME -> tool name.
+    for (src_name, expect_wrapper, expect_tool) in [
+        ("clangpp-rs", UNKNOWN_KEYWORD, "clang++"),
+        ("gpp-rs", UNKNOWN_KEYWORD, "g++"),
+        ("sccache-clangpp-rs", "sccache", "clang++"),
+        ("sccache-gpp-rs", "sccache", "g++"),
+        ("clang-rs", UNKNOWN_KEYWORD, "clang"),
+        ("sccache-clang-cl-rs", "sccache", "clang-cl"),
+    ] {
+        let canonical = normalize_src_name(src_name);
+        let tool_src = canonical.strip_suffix("-rs").unwrap_or(&canonical).to_string();
+        let mut args = Vec::new();
+        let (wrapper, tool) = get_executable_names(&tool_src, &mut args);
+        assert_eq!(wrapper, expect_wrapper, "wrapper for {src_name}");
+        assert_eq!(tool, expect_tool, "tool for {src_name}");
+    }
+}
+
 // ---- Executable name resolution -------------------------------------
 
 #[test]

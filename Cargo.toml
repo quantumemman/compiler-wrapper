@@ -1,6 +1,6 @@
 [package]
 name = "wrapper"
-version = "0.2.6"
+version = "0.2.8"
 edition = "2024"
 
 [dependencies]
@@ -11,64 +11,64 @@ zccache-depgraph = "1.9.0"
 
 [[bin]]
 name = "cl-rs"
-path = "src/cl.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "clang-rs"
-path = "src/clang.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "clangpp-rs"
-path = "src/clang++.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "clang-cl-rs"
-path = "src/clang-cl.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "gcc-rs"
-path = "src/gcc.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "gpp-rs"
-path = "src/g++.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "link-rs"
-path = "src/link.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "ld-rs"
-path = "src/ld.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "lld-link-rs"
-path = "src/lld-link.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-rs"
-path = "src/sccache.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-cl-rs"
-path = "src/sccache-cl.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-clang-rs"
-path = "src/sccache-clang.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-clangpp-rs"
-path = "src/sccache-clang++.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-clang-cl-rs"
-path = "src/sccache-clang-cl.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-gcc-rs"
-path = "src/sccache-gcc.rs"
+path = "src/main.rs"
 
 [[bin]]
 name = "sccache-gpp-rs"
-path = "src/sccache-g++.rs"
+path = "src/main.rs"

@@ -1,25 +1,25 @@
 // Module declarations
+mod logger;
 mod constants;
-mod executable;
-mod classification;
+mod classify;
 mod filter;
 mod parser;
 mod runtime;
-mod logger;
+mod targets;
 mod usage;
 
 // Re-export public API
-pub use executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
-pub use classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
+pub use logger::init_logger;
+pub use classify::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
 pub use filter::{FilterConfig, filter_args, apply_filter};
 pub use parser::{parse_args, locate_last_flag, find_options_end, flag_takes_separate_value, embedded_flag_value, is_source_arg, LocatedFlag};
 pub use runtime::Runtime;
-pub use logger::init_logger;
+pub use targets::{normalize_src_name, get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 pub use usage::{print_usage, help_message, version_message};
 
 // Re-export constants
 pub use constants::{
-    LLVM_PATH_VS, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH,
+    VS_LLVM_PATH, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH,
     PATHS, EXTERNAL_WRAPPER_KEYWORDS, PROJECT_SIGNATURE,
     ARGS_CHAR_LIMIT, BAD_MATCH_MESSAGE, RESPONSE_FILE_NAME,
     COMPILER_KEYWORDS, LINKER_KEYWORDS, SPLIT_FUSED_FLAGS, FIX_FLAG_PREFIXES,

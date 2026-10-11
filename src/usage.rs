@@ -1,6 +1,6 @@
 use std::env;
-use crate::runtime::{Runtime};
 use crate::constants::{NONE_KEYWORD, CLI_HELP_FLAGS, CLI_VERSION_FLAGS};
+use crate::runtime::{Runtime};
 
 /// Package version from Cargo.toml
 const VERSION: &str = env!("CARGO_PKG_VERSION");

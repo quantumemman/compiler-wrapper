@@ -1,15 +1,14 @@
 use std::env;
-use std::path::Path;
 use log::{trace, debug, info, warn};
-use crate::filter::{FilterConfig, filter_args};
 use crate::constants::{NONE_KEYWORD};
-use crate::executable::{get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
-use crate::classification::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
+use crate::classify::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
+use crate::filter::{FilterConfig, filter_args};
+use crate::targets::{normalize_src_name, get_executable_names, get_executable_paths, get_main_and_deputy_executable_paths};
 
 /// Holds runtime information for the wrapper.
 pub struct Runtime {
-    pub src_file: String,
-    pub src_executable: String,
+    pub src_name: String,
+    pub canonical_name: String,
     pub current_executable: String,
     pub input_args: Vec<String>,
     pub target_executable_names: (String, String),
@@ -22,11 +21,17 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Creates a new Runtime from the given arguments.
-    pub fn new(src_file: String, mut input_args: Vec<String>) -> Self {
+    /// Creates a new Runtime from the Cargo binary name and CLI args.
+    /// `src_name` is the `[[bin]] name` from Cargo.toml (via `env!("CARGO_BIN_NAME")`
+    /// in `src/main.rs`). `pp` spellings are normalized to `++` here so tool
+    /// resolution matches the real compilers (`clang++`, `g++`).
+    pub fn new(src_name: String, mut input_args: Vec<String>) -> Self {
         let mut final_args: Vec<String>;
-        let src_executable = Path::new(&src_file).file_name().unwrap().to_str().unwrap().to_string().trim_end_matches(".rs").to_string();
-        trace!("Src executable: {}", src_executable);
+        let canonical_name = normalize_src_name(&src_name);
+        // Strip the `-rs` wrapper suffix to get the real tool name (e.g. `clang++-rs` -> `clang++`).
+        // The `-rs` suffix is kept on `canonical_name` for PROJECT_SIGNATURE self-detection.
+        let src_executable = canonical_name.strip_suffix("-rs").unwrap_or(&canonical_name).to_string();
+        trace!("Src name: {} -> canonical: {} -> tool: {}", src_name, canonical_name, src_executable);
 
         let current_executable = env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
         trace!("Current executable: {}", current_executable);
@@ -59,8 +64,8 @@ impl Runtime {
         let expect: String = main_exe.clone() + " died";
 
         Runtime {
-            src_file,
-            src_executable,
+            src_name,
+            canonical_name,
             current_executable,
             input_args,
             target_executable_names,
@@ -74,8 +79,8 @@ impl Runtime {
     }
 
     pub fn print_info(&self) {
-        debug!("Src File: {}", self.src_file);
-        debug!("Src Executable: {}", self.src_executable);
+        debug!("Src Name: {}", self.src_name);
+        debug!("Canonical Name: {}", self.canonical_name);
         debug!("Current Executable: {}", self.current_executable);
         warn!("Input Args: {:?}", self.input_args);
         debug!("Target Executable Names: {:?}", self.target_executable_names);
