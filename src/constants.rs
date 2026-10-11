@@ -22,7 +22,7 @@ pub const WRAPPER_PATH: &str = env!("WRAPPER_WRAPPER_PATH");
 pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
     if env::var("WRAPPER_PREFER_VS").is_ok() {
         log::info!("Preferring Visual Studio LLVM toolchain");
-        &[VS_LLVM_PATH, MSVC_PATH, LLVM_PATH, GCC_PATH, WRAPPER_PATH]
+        &[VS_LLVM_PATH, LLVM_PATH, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
     } else {
         log::debug!("Preferring Custom LLVM toolchain (default)");
         &[LLVM_PATH, VS_LLVM_PATH, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
@@ -32,7 +32,7 @@ pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
 /////////////////////////////////////////////////////////////////////////////////////////
 //                     Define Wrapper/Compiler/Linker Keywords                         //
 /////////////////////////////////////////////////////////////////////////////////////////
-// Keywords for detecting wrapper executables (e.g., ccache)
+// Keywords for detecting wrapper executables (e.g., sccache, ccache)
 pub static EXTERNAL_WRAPPER_KEYWORDS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)ccache"#).unwrap());
 
 // Compiler executable keywords

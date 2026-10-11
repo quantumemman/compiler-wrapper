@@ -1,5 +1,5 @@
 use std::env;
-use crate::constants::{NONE_KEYWORD, CLI_HELP_FLAGS, CLI_VERSION_FLAGS};
+use crate::constants::{NONE_KEYWORD, ARGS_CHAR_LIMIT, CLI_HELP_FLAGS, CLI_VERSION_FLAGS};
 use crate::runtime::{Runtime};
 
 /// Package version from Cargo.toml
@@ -132,8 +132,8 @@ fn section_row(title: &str, inner: usize) -> String {
 /// Prints the wrapper usage/help message.
 /// Returns `true` if the help message was shown (so the caller can exit), `false` otherwise.
 pub fn print_usage(runtime: &Runtime) -> bool {
-    const INNER: usize = 90; // usable text columns between the two side borders
-    const NAME_W: usize = 30; // reserved width for the variable-name column
+    const INNER: usize = 96; // usable text columns between the two side borders
+    const NAME_W: usize = 32; // reserved width for the variable-name column
     let rule = "═".repeat(INNER + 2);
 
     let mut lines: Vec<String> = Vec::new();
@@ -166,31 +166,10 @@ pub fn print_usage(runtime: &Runtime) -> bool {
     ));
     lines.push(box_row("", INNER));
 
-    // ---- Flags & behaviour ----
-    lines.push(section_row("FLAGS & BEHAVIOR", INNER));
+    // ---- Runtime verbosity ----
+    lines.push(section_row("RUNTIME VERBOSITY LEVEL", INNER));
     lines.extend(usage_pair(
-        "WRAPPER_PREFER_VS",
-        "Prefer VS Studio LLVM executables over Custom LLVM.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        "WRAPPER_CLANG_CL_IS_LLVM",
-        "Treat clang-cl as LLVM family. All flag processing is done from the LLVM perspective.",
-        NAME_W,
-        INNER,
-    ));
-    lines.extend(usage_pair(
-        "WRAPPER_CLANG_CL_IS_MSVC",
-        "Treat clang-cl as MSVC family (the default). All flag processing is done from the MSVC perspective.",
-        NAME_W,
-        INNER,
-    ));
-
-    // ---- Runtime info ----
-    lines.push(section_row("RUNTIME INFO", INNER));
-    lines.extend(usage_pair(
-        "WRAPPER_LOG_LEVEL",
+        "RUST_LOG",
         "Set the log level (trace, debug, info, warn, error). Default: error.",
         NAME_W,
         INNER,
@@ -202,8 +181,65 @@ pub fn print_usage(runtime: &Runtime) -> bool {
         INNER,
     ));
 
-    // ---- Filtering ----
-    lines.push(section_row("FILTERING", INNER));
+    // ---- Executables Discovery Paths ----
+    lines.push(section_row("EXECUTABLES DISCOVERY PATHS", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_PREFER_VS",
+        "Prioritize executables in Visual Studio LLVM Path over custom.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_MSVC_PATH",
+        "Path to Microsoft Visual Studio MSVC toolchain.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_VS_LLVM_PATH",
+        "Path to Microsoft Visual Studio LLVM toolchain.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_LLVM_PATH",
+        "Path to Custom LLVM toolchain.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_GCC_PATH",
+        "Path to GNU Compiler Collection toolchain.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_WRAPPER_PATH",
+        "Path to wrappers such as sccache and ccache.",
+        NAME_W,
+        INNER,
+    ));
+
+    // ---- Flag Processing (Opt-In)----
+    lines.push(section_row("FLAG PROCESSING (OPT-IN)", INNER));
+    lines.extend(usage_pair(
+        "WRAPPER_CLANG_CL_IS_MSVC",
+        "Treat clang-cl as MSVC family (default, no effect).",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_CLANG_CL_IS_LLVM",
+        "Treat clang-cl as LLVM family.",
+        NAME_W,
+        INNER,
+    ));
+    lines.extend(usage_pair(
+        "WRAPPER_FIX_FLAG_PREFIXES",
+        "Enable fixing flag prefixes e.g. /version:0.0 -> -version:0.0",
+        NAME_W,
+        INNER,
+    ));
     lines.extend(usage_pair(
         "WRAPPER_SPLIT_FUSED_FLAGS",
         "Enable splitting fused flag+value step.",
@@ -211,11 +247,20 @@ pub fn print_usage(runtime: &Runtime) -> bool {
         INNER,
     ));
     lines.extend(usage_pair(
-        "WRAPPER_FIX_FLAG_PREFIXES",
-        "Enable fixing flag prefixes (e.g., /version:0.0 -> -version:0.0).",
+        "WRAPPER_ARGS_CHAR_LIMIT",
+        format!("Override the project's {} character count minimum to use response files.", ARGS_CHAR_LIMIT).as_str(),
         NAME_W,
         INNER,
     ));
+    lines.extend(usage_pair(
+        "WRAPPER_FORCE_RESPONSE_FILES",
+        "Force the use of response files with no character count minimum.",
+        NAME_W,
+        INNER,
+    ));
+    
+    // ---- Flag Processing (Opt-Out)----
+    lines.push(section_row("FLAG PROCESSING (OPT-OUT)", INNER));
     lines.extend(usage_pair(
         "WRAPPER_SKIP_BAD_FLAGS",
         "Skip bad flags removal step.",
@@ -234,18 +279,18 @@ pub fn print_usage(runtime: &Runtime) -> bool {
         NAME_W,
         INNER,
     ));
+
+    // ---- Various Modes ----
+    lines.push(section_row("PASSTHROUGH MODE", INNER));
     lines.extend(usage_pair(
         "WRAPPER_SKIP_ALL_FLAGS",
         "Skip all opt-out flag processing i.e. bad, swap, add.",
         NAME_W,
         INNER,
     ));
-
-    // ---- Passthrough ----
-    lines.push(section_row("PASSTHROUGH", INNER));
     lines.extend(usage_pair(
-        "WRAPPER_ENABLE_PASSTHROUGH",
-        "Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target.",
+        "WRAPPER_ENABLE_PASSTHROUGH_MODE",
+        "Pass all args directly to the target executable without any flag processing. The wrapper behaves identically to the intended target executable.",
         NAME_W,
         INNER,
     ));
@@ -254,7 +299,7 @@ pub fn print_usage(runtime: &Runtime) -> bool {
     lines.push(section_row("CLI FLAGS", INNER));
     lines.extend(usage_pair(
         &format!("{:?}", CLI_VERSION_FLAGS.join("|")),
-        "Print version information and exit.",
+        "Print version info and exit.",
         NAME_W,
         INNER,
     ));
@@ -288,7 +333,7 @@ pub fn print_usage(runtime: &Runtime) -> bool {
 /// Checks if any of the CLI args are help/usage flags.
 /// If so, prints the usage message and returns `true`.
 pub fn help_message(runtime: &Runtime) -> bool {
-    if CLI_HELP_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+    if CLI_HELP_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
         return print_usage(&runtime);  // Print usage if help flags are present and exit
     }
     false
@@ -297,7 +342,7 @@ pub fn help_message(runtime: &Runtime) -> bool {
 /// Checks if any of the CLI args are version flags.
 /// If so, prints the version message and returns `true`.
 pub fn version_message(runtime: &Runtime) -> bool {
-    if CLI_VERSION_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+    if CLI_VERSION_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
         println!(">> wrapper {} v{}", runtime.current_executable, VERSION);
         println!("-> {}", runtime.main_exe);
         if runtime.deputy_exe != NONE_KEYWORD { println!("-> {}", runtime.deputy_exe);}

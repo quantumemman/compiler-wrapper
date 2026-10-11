@@ -235,17 +235,17 @@ clang-rs.exe -c main.cpp   # logs appear on screen and in wrapper_debug.log
 | Variable | Effect |
 |----------|--------|
 | `WRAPPER_PREFER_VS` | Prefer Visual Studio's LLVM executables over Custom LLVM when locating tools. |
-| `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family instead of the default MSVC. |
 | `WRAPPER_CLANG_CL_IS_MSVC` | Default. No effect. Route `clang-cl` to use the MSVC family instead of LLVM. |
-| `WRAPPER_SPLIT_FUSED_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
+| `WRAPPER_CLANG_CL_IS_LLVM` | Route `clang-cl` down the LLVM family instead of the default MSVC. |
 | `WRAPPER_FIX_FLAG_PREFIXES` | Fix flag prefixes (**off by default**; enable to turn the fix step on). |
+| `WRAPPER_SPLIT_FUSED_FLAGS` | Split fused `/Fd<dir>` / `/Fo<dir>` flags (**off by default**; enable to turn the split step on). |
+| `WRAPPER_ARGS_CHAR_LIMIT` | Override the response-file threshold (default `30000`). |
+| `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
 | `WRAPPER_SKIP_BAD_FLAGS` | Skip removing known-bad flags. |
 | `WRAPPER_SKIP_SWAP_FLAGS` | Skip swapping problematic flags. |
 | `WRAPPER_SKIP_ADD_FLAGS` | Skip adding extra helpful flags. |
 | `WRAPPER_SKIP_ALL_FLAGS` | Disable opt-out options: remove-bad / swap / add steps at once; split / fix flag prefixes are opt-in and available. |
-| `WRAPPER_ARGS_CHAR_LIMIT` | Override the response-file threshold (default `30000`). |
-| `WRAPPER_FORCE_RESPONSE_FILES` | Always emit a response file, regardless of argument length. |
-| `WRAPPER_ENABLE_PASSTHROUGH` | Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target. |
+| `WRAPPER_ENABLE_PASSTHROUGH_MODE` | Pass all arguments directly to the target without any processing. The wrapper behaves identically to the intended target. |
 | `RUST_LOG` | Set `DualLogger` diagnostic verbosity (`error` default, up to `trace`). |
 | `WRAPPER_LOG_FILE` | Path to a file for dual logging — log messages are written here in addition to stdout. Same level as `RUST_LOG`. |
 

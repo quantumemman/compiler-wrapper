@@ -49,7 +49,7 @@ impl Runtime {
         debug!("Target classification: {:?}", target_classification);
 
         // Check to see if passthrough mode is enabled to skip args processing
-        if env::var("WRAPPER_ENABLE_PASSTHROUGH").is_ok() {
+        if env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() {
             debug!("Passthrough mode enabled - skipping all argument processing");
             final_args = input_args.clone();
         } else {
