@@ -1,4 +1,3 @@
-use std::env;
 use crate::constants::{NONE_KEYWORD, ARGS_CHAR_LIMIT, CLI_HELP_FLAGS, CLI_VERSION_FLAGS};
 use crate::runtime::{Runtime};
 
@@ -11,6 +10,7 @@ pub mod ansi {
     pub const BOLD: &str = "\x1b[1m";
     pub const DIM: &str = "\x1b[2m";
 
+    pub const GREEN: &str = "\x1b[32m";
     pub const YELLOW: &str = "\x1b[33m";
     pub const MAGENTA: &str = "\x1b[35m";
     pub const CYAN: &str = "\x1b[36m";
@@ -141,7 +141,7 @@ pub fn print_usage(runtime: &Runtime) -> bool {
     // ---- Heading ----
     lines.push(box_row("", INNER));
     lines.push(box_row(
-        &center_text(&paint(format!("Usage - wrapper {} v{}", runtime.current_executable, VERSION).as_str(), &format!("{}{}", ansi::BOLD, ansi::CYAN)),
+        &center_text(&paint(format!("Usage for {} wrapper v{}", runtime.current_executable, VERSION).as_str(), &format!("{}{}", ansi::BOLD, ansi::GREEN)),
             INNER,
         ),
         INNER,
@@ -161,7 +161,7 @@ pub fn print_usage(runtime: &Runtime) -> bool {
         INNER,
     ));
     lines.push(box_row(
-        &center_text(&paint("Environment variables understood by the wrapper", ansi::DIM), INNER),
+        &center_text(&paint("Environment variables recognized by the wrapper", ansi::DIM), INNER),
         INNER,
     ));
     lines.push(box_row("", INNER));
@@ -333,7 +333,7 @@ pub fn print_usage(runtime: &Runtime) -> bool {
 /// Checks if any of the CLI args are help/usage flags.
 /// If so, prints the usage message and returns `true`.
 pub fn help_message(runtime: &Runtime) -> bool {
-    if CLI_HELP_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+    if CLI_HELP_FLAGS.contains(&runtime.input_args[0].as_str()) && !std::env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !std::env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
         return print_usage(&runtime);  // Print usage if help flags are present and exit
     }
     false
@@ -342,10 +342,10 @@ pub fn help_message(runtime: &Runtime) -> bool {
 /// Checks if any of the CLI args are version flags.
 /// If so, prints the version message and returns `true`.
 pub fn version_message(runtime: &Runtime) -> bool {
-    if CLI_VERSION_FLAGS.contains(&runtime.input_args[0].as_str()) && !env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
-        println!(">> wrapper {} v{}", runtime.current_executable, VERSION);
-        println!("-> {}", runtime.main_exe);
-        if runtime.deputy_exe != NONE_KEYWORD { println!("-> {}", runtime.deputy_exe);}
+    if CLI_VERSION_FLAGS.contains(&runtime.input_args[0].as_str()) && !std::env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() && !std::env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok() {
+        println!(">> {}", &paint(&format!("{} wrapper v{}", runtime.current_executable, VERSION), &format!("{}{}", ansi::BOLD, ansi::GREEN)));
+        println!("-> {}", &paint(&format!("{}", runtime.main_exe), &format!("{}{}", ansi::BOLD, ansi::CYAN)));
+        if runtime.deputy_exe != NONE_KEYWORD { println!("-> {}", &paint(&format!("{}", runtime.deputy_exe), &format!("{}{}", ansi::BOLD, ansi::CYAN)));}
         return true;
     }
     false

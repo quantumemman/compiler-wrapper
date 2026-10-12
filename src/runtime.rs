@@ -1,4 +1,3 @@
-use std::env;
 use log::{trace, debug, info, warn};
 use crate::constants::{NONE_KEYWORD};
 use crate::classify::{ExecutableFamily, ExecutableKind, get_target_classification, get_args_filter_pack};
@@ -33,7 +32,7 @@ impl Runtime {
         let src_executable = canonical_name.strip_suffix("-rs").unwrap_or(&canonical_name).to_string();
         trace!("Src name: {} -> canonical: {} -> tool: {}", src_name, canonical_name, src_executable);
 
-        let current_executable = env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+        let current_executable = std::env::current_exe().unwrap().file_name().unwrap().to_str().unwrap().to_string();
         trace!("Current executable: {}", current_executable);
 
         let target_executable_names: (String, String) = get_executable_names(&src_executable, &mut input_args);
@@ -49,7 +48,7 @@ impl Runtime {
         debug!("Target classification: {:?}", target_classification);
 
         // Check to see if passthrough mode is enabled to skip args processing
-        if env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() {
+        if std::env::var("WRAPPER_ENABLE_PASSTHROUGH_MODE").is_ok() {
             debug!("Passthrough mode enabled - skipping all argument processing");
             final_args = input_args.clone();
         } else {

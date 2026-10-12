@@ -1,32 +1,43 @@
 use std::env;
 use std::sync::LazyLock;
+use std::ffi::OsString;
 use regex::Regex;
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //                         Define Executables Search Paths                             //
 /////////////////////////////////////////////////////////////////////////////////////////
-// Microsoft Visual C++ toolchain path
-pub const MSVC_PATH: &str = env!("WRAPPER_MSVC_PATH");
+// Visual Studio MSVC toolchain path
+pub const MSVC_PATH: &str = "WRAPPER_MSVC_PATH";
 // Visual Studio LLVM toolchain path
-pub const VS_LLVM_PATH: &str = env!("WRAPPER_VS_LLVM_PATH");
+pub const VS_LLVM_PATH: &str = "WRAPPER_VS_LLVM_PATH";
 // Custom LLVM toolchain path
-pub const LLVM_PATH: &str = env!("WRAPPER_LLVM_PATH");
+pub const LLVM_PATH: &str = "WRAPPER_LLVM_PATH";
 // GNU Compiler Collection path
-pub const GCC_PATH: &str = env!("WRAPPER_GCC_PATH");
+pub const GCC_PATH: &str = "WRAPPER_GCC_PATH";
 // Path to wrappers such as sccache and ccache
-pub const WRAPPER_PATH: &str = env!("WRAPPER_WRAPPER_PATH");
+pub const WRAPPER_PATH: &str = "WRAPPER_WRAPPER_PATH";
 
 /// Returns the ordered list of executable search paths.
-/// If `WRAPPER_PREFER_VS` is set, prefers Visual Studio's LLVM toolchain;
-/// otherwise prefers Custom LLVM.
-pub static PATHS: LazyLock<&[&str]> = LazyLock::new(|| {
-    if env::var("WRAPPER_PREFER_VS").is_ok() {
+/// If `WRAPPER_PREFER_VS` is set, prefers Visual Studio's LLVM toolchain over custom LLVM.
+pub static PATHS: LazyLock<OsString> = LazyLock::new(|| {
+    let mut paths = Vec::new();
+    
+    let envvars: &[&str] = if env::var("WRAPPER_PREFER_VS").is_ok() {
         log::info!("Preferring Visual Studio LLVM toolchain");
         &[VS_LLVM_PATH, LLVM_PATH, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
     } else {
         log::debug!("Preferring Custom LLVM toolchain (default)");
         &[LLVM_PATH, VS_LLVM_PATH, MSVC_PATH, GCC_PATH, WRAPPER_PATH]
+    };
+    
+    for var in envvars {
+        if let Ok(value) = env::var(var) {
+            paths.push(value.into());
+        }
     }
+    
+    env::join_paths(paths.into_iter().chain(env::split_paths(&env::var_os("PATH").unwrap_or_default())))
+        .expect("Failed to join paths").into()
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use log::{debug, trace};
 use crate::constants::{PATHS, UNKNOWN_KEYWORD, NONE_KEYWORD, EXTERNAL_WRAPPER_KEYWORDS, 
     COMPILER_KEYWORDS, LINKER_KEYWORDS, PROJECT_SIGNATURE
@@ -41,42 +41,36 @@ pub fn get_executable_names(src_executable: &String, input_args: &mut Vec<String
 }
 
 /// Find an executable in the given search paths.
-fn find_executable(executable_name: &str, paths: &[&str]) -> Option<PathBuf> {
+fn find_executable(executable_name: &str) -> String {
     if executable_name != UNKNOWN_KEYWORD {
         if !(PROJECT_SIGNATURE.is_match(&executable_name) || Path::new(executable_name).is_absolute()) {
-            for dir in paths {
-                let candidate = Path::new(dir).join(executable_name);
+            for dir in std::env::split_paths(&PATHS.clone()) {
+                let candidate = Path::new(&dir).join(executable_name);
                 let candidate = if cfg!(windows) {
                     candidate.with_extension("exe")
                 } else {
                     candidate
                 };
-                trace!("Checking candidate path: {:?}", candidate);
+                trace!("Checking candidate: {:?}", candidate);
                 if candidate.exists() && candidate.is_file() {
-                    debug!("Found {} in {}", executable_name, dir);
-                    return Some(candidate.to_path_buf());
+                    debug!("Found: {:?}", candidate);
+                    return Some(candidate.to_path_buf())
+                    .unwrap_or(NONE_KEYWORD.into()).to_str()
+                    .unwrap_or(NONE_KEYWORD.into()).to_string();
                 }
             }
         } else {
             debug!("Executable is absolute or another wrapper in this project, returning as is: {}", executable_name);
-            return Some(PathBuf::from(executable_name));
+            return executable_name.to_string();
         }
     }
-    None
+    NONE_KEYWORD.into()
 }
 
 /// Resolve the full paths for the wrapper and tool executables.
 pub fn get_executable_paths(target_executable_names: &(String, String)) -> (String, String) {
-    let wrapper_path: String = find_executable(&target_executable_names.0, &*PATHS)
-        .unwrap_or(NONE_KEYWORD.into())
-        .to_str()
-        .unwrap_or("")
-        .to_string();
-    let executable_path: String = find_executable(&target_executable_names.1, &*PATHS)
-        .unwrap_or(NONE_KEYWORD.into())
-        .to_str()
-        .unwrap_or("")
-        .to_string();
+    let wrapper_path: String = find_executable(&target_executable_names.0);
+    let executable_path: String = find_executable(&target_executable_names.1);
     (wrapper_path.replace("\\", "/"), executable_path.replace("\\", "/"))
 }
 

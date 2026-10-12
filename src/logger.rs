@@ -1,8 +1,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::sync::Mutex;
+use std::sync::{Mutex, LazyLock};
 use log::{Level, LevelFilter, Metadata, Record, Log};
-use std::sync::LazyLock;
 
 /// A dual logger that writes to both the console and a log file.
 struct DualLogger {

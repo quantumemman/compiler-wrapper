@@ -1,6 +1,5 @@
 use log::trace;
 use regex::Regex;
-use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -25,23 +24,23 @@ pub struct FilterConfig {
 impl FilterConfig {
     // Reads the WRAPPER_* environment variables into a FilterConfig.
     pub fn from_env() -> Self {
-        let skip_all = env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
+        let skip_all = std::env::var("WRAPPER_SKIP_ALL_FLAGS").is_ok();
         FilterConfig {
             // Splitting fused flags is OFF by default; WRAPPER_SPLIT_FUSED_FLAGS opts it back in.
-            skip_split: !env::var("WRAPPER_SPLIT_FUSED_FLAGS").is_ok(),
+            skip_split: !std::env::var("WRAPPER_SPLIT_FUSED_FLAGS").is_ok(),
             // Fixing flag prefixes is OFF by default; WRAPPER_FIX_FLAG_PREFIXES opts it back in.
-            skip_prefixes: !env::var("WRAPPER_FIX_FLAG_PREFIXES").is_ok(),
-            skip_bad: skip_all || env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
-            skip_swap: skip_all || env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
-            skip_add: skip_all || env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
-            force_response_files: env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
+            skip_prefixes: !std::env::var("WRAPPER_FIX_FLAG_PREFIXES").is_ok(),
+            skip_bad: skip_all || std::env::var("WRAPPER_SKIP_BAD_FLAGS").is_ok(),
+            skip_swap: skip_all || std::env::var("WRAPPER_SKIP_SWAP_FLAGS").is_ok(),
+            skip_add: skip_all || std::env::var("WRAPPER_SKIP_ADD_FLAGS").is_ok(),
+            force_response_files: std::env::var("WRAPPER_FORCE_RESPONSE_FILES").is_ok(),
             args_char_limit: FilterConfig::get_args_char_limit(),
         }
     }
 
     // Resolves the effective character limit, honoring WRAPPER_ARGS_CHAR_LIMIT.
     fn get_args_char_limit() -> usize {
-        match env::var("WRAPPER_ARGS_CHAR_LIMIT") {
+        match std::env::var("WRAPPER_ARGS_CHAR_LIMIT") {
             Ok(v) => v.trim().parse::<usize>().unwrap_or(ARGS_CHAR_LIMIT),
             Err(_) => ARGS_CHAR_LIMIT,
         }
